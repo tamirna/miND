@@ -1,0 +1,89 @@
+---
+# define distribution of threads on single rules running in snakemake.
+# e.g. 12, 8, 3 works out well on a 48 core machine.
+# for a 12 core cpu, 6,4,2 could be a good starting point.
+threads:
+  high: 6
+  medium: 4
+  low: 2
+
+# set miRBase and RNAcentral versions the same as in the repository/ subfolders config.yml files
+miRBaseVersion: "22.1"
+rnacentralVersion: "19.0"
+
+# make sure that the genomeIDs, code, genomeVersion and txid equals to the storage structure found in repository/data directors
+# unused sources do not have to be commented out but if data is not available then there will be errors when this species is selected
+speciesData:
+  Homo sapiens:
+    genomeID: GRCh38
+    code: hsa
+    genomeVersion: p13
+    txid: '9606'
+  Mus musculus:
+    genomeID: GRCm39
+    code: mmu
+    genomeVersion: na
+    txid: '10090'
+  Sus scrofa:
+    genomeID: Sscrofa
+    code: ssc
+    genomeVersion: '11.1'
+    txid: '9823'
+  Equus caballus:
+    genomeID: EquCab
+    code: eca
+    genomeVersion: '3.0'
+    txid: '9796'
+  Caenorhabditis elegans:
+    genomeID: WBcel
+    code: cel
+    genomeVersion: '235'
+    txid: '6239'
+  Felis catus:
+    genomeID: Felis_catus
+    code: cfa
+    genomeVersion: '9.0'
+    txid: '9685'
+  Canis lupus familiaris:
+    genomeID: CanFam
+    code: cfa
+    genomeVersion: '3.1'
+    txid: '9615'
+  Bos taurus:
+    genomeID: ARS-UCD
+    code: bta
+    genomeVersion: '1.2'
+    txid: '9913'
+  Rattus norvegicus:
+    genomeID: Rnor
+    code: rno
+    genomeVersion: '6.0'
+    txid: '10116'
+  Oryctolagus cuniculus:
+    genomeID: OryCun
+    code: ocu
+    genomeVersion: '2.0'
+    txid: '9986'
+  Danio rerio:
+    genomeID: GRCz
+    code: dre
+    genomeVersion: '11'
+    txid: '7955'
+  Drosophila melanogaster:
+    genomeID: BDGP6
+    code: dme
+    genomeVersion: '22'
+    txid: '7227'
+  Cricetulus griseus:
+    genomeID: CriGri
+    code: cgr
+    genomeVersion: PICR
+    txid: '10029'
+  Cavia porcellus:
+    genomeID: Cavpor
+    code: cpo
+    genomeVersion: '3.0'
+    txid: '10141'
+
+repoPath: "repository/data" # select the directory (relative or absolute) where reference data (genomes, miRBase, etc) is located
+condaPath: "envs/tmp" # select the directory where conda should store the created environments. this can and should be shared between multiple installations of the miND pipeline, so an absolute path is recommended

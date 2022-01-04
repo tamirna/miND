@@ -1,0 +1,8 @@
+name: gawk
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - seqtk=1.3
+  - gawk=5.0.0

@@ -1,0 +1,173 @@
+---
+# define distribution of threads on single rules running in snakemake.
+# e.g. 12, 8, 3 works out well on a 48 core machine.
+# for a 12 core cpu, 6,4,2 could be a good starting point.
+threads:
+  high: 6
+  medium: 4
+  low: 2
+# Additional species can be added by adding more sub blocks to the "genomeSources" section. Please see examples below for more details
+genomeSources:
+  GRCh38: # hg38
+    id: GCA_000001405.28
+    urls:
+      # update links to these files as needed based on paths found on ftp.ensembl.org
+      genome: ftp://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna_sm.primary_assembly.fa.gz
+      cdna: ftp://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz
+    name: GRCh38
+    version: p13
+    accessed: '2021-12-13T07:00:00+01:00'
+    provider: ENSEMBL
+    website: https://www.ensembl.org/Homo_sapiens/Info/Index
+    cite: ""
+  GRCm39:
+    id: GCA_000001635.9
+    urls:
+      genome: ftp://ftp.ensembl.org/pub/release-105/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna_sm.primary_assembly.fa.gz
+      cdna: ftp://ftp.ensembl.org/pub/release-105/fasta/mus_musculus/cdna/Mus_musculus.GRCm39.cdna.all.fa.gz
+    name: GRCm39
+    version: na
+    accessed: '2021-12-13T07:00:00+01:00'
+    provider: ENSEMBL
+    website: https://www.ensembl.org/Mus_musculus/Info/Index
+    cite: ""
+  # Sscrofa:
+  #   id: GCA_000003025.6
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/sus_scrofa/dna/Sus_scrofa.Sscrofa11.1.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/sus_scrofa/cdna/Sus_scrofa.Sscrofa11.1.cdna.all.fa.gz
+  #   name: Sscrofa
+  #   version: '11.1'
+  #   accessed: '2019-04-18T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: https://www.ensembl.org/Sus_scrofa/Info/Index
+  #   cite: ""
+  # Rnor:
+  #   id: GCA_000001895.4
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/rattus_norvegicus/dna/Rattus_norvegicus.Rnor_6.0.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/rattus_norvegicus/cdna/Rattus_norvegicus.Rnor_6.0.cdna.all.fa.gz
+  #   name: Rnor
+  #   version: '6.0'
+  #   accessed: '2019-05-09T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: https://www.ensembl.org/Rattus_norvegicus/Info/Index
+  #   cite: ""
+  # ARS-UCD:
+  #   id: GCA_002263795.2
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/bos_taurus/dna/Bos_taurus.ARS-UCD1.2.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/bos_taurus/cdna/Bos_taurus.ARS-UCD1.2.cdna.all.fa.gz
+  #   name: ARS-UCD
+  #   version: '1.2'
+  #   accessed: '2019-04-18T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: https://www.ensembl.org/Bos_taurus/Info/Index
+  #   cite: ""
+  # BDGP6:
+  #   id: GCA_000001215.4
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/drosophila_melanogaster/dna/Drosophila_melanogaster.BDGP6.22.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/drosophila_melanogaster/cdna/Drosophila_melanogaster.BDGP6.22.cdna.all.fa.gz
+  #   name: BDGP6
+  #   version: '22'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Drosophila_melanogaster/Info/Index
+  #   cite: ""
+  # WBcel:
+  #   id: GCA_000002985.3
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/caenorhabditis_elegans/dna/Caenorhabditis_elegans.WBcel235.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/caenorhabditis_elegans/cdna/Caenorhabditis_elegans.WBcel235.cdna.all.fa.gz
+  #   name: WBcel
+  #   version: '235'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Caenorhabditis_elegans/Info/Index
+  #   cite: ""
+  # EquCab:
+  #   id: GCA_002863925.1
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/equus_caballus/dna/Equus_caballus.EquCab3.0.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/equus_caballus/cdna/Equus_caballus.EquCab3.0.cdna.all.fa.gz
+  #   name: EquCab
+  #   version: '3.0'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Equus_caballus/Info/Index
+  #   cite: ""
+  # CanFam:
+  #   id: GCA_000002285.2
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/canis_familiaris/dna/Canis_familiaris.CanFam3.1.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/canis_familiaris/cdna/Canis_familiaris.CanFam3.1.cdna.all.fa.gz
+  #   name: CanFam
+  #   version: '3.1'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Canis_familiaris/Info/Index
+  #   cite: ""
+  # Felis_catus:
+  #   id: GCA_000181335.4
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/felis_catus/dna/Felis_catus.Felis_catus_9.0.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/felis_catus/cdna/Felis_catus.Felis_catus_9.0.cdna.all.fa.gz
+  #   name: Felis_catus
+  #   version: '9.0'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Felis_catus/Info/Index
+  #   cite: ""
+  # OryCun:
+  #   id: GCA_000003625.1
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/oryctolagus_cuniculus/dna/Oryctolagus_cuniculus.OryCun2.0.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/oryctolagus_cuniculus/cdna/Oryctolagus_cuniculus.OryCun2.0.cdna.all.fa.gz
+  #   name: OryCun
+  #   version: '2.0'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Oryctolagus_cuniculus/Info/Index
+  #   cite: ""
+  # Cavpor:
+  #   id: GCA_000151735.1
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/cavia_porcellus/dna/Cavia_porcellus.Cavpor3.0.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/cavia_porcellus/cdna/Cavia_porcellus.Cavpor3.0.cdna.all.fa.gz
+  #   name: Cavpor
+  #   version: '3.0'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Cavia_porcellus/Info/Index
+  #   cite: ""
+  # CriGri:
+  #   id: GCA_003668045.1
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/cricetulus_griseus_picr/dna/Cricetulus_griseus_picr.CriGri-PICR.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/cricetulus_griseus_picr/cdna/Cricetulus_griseus_picr.CriGri-PICR.cdna.all.fa.gz
+  #   name: CriGri
+  #   version: 'PICR'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Cricetulus_griseus_picr/Info/Index
+  #   cite: ""
+  # GRCz:
+  #   id: GCA_000002035.4
+  #   urls:
+  #     genome: ftp://ftp.ensembl.org/pub/release-98/fasta/danio_rerio/dna/Danio_rerio.GRCz11.dna_sm.toplevel.fa.gz
+  #     cdna: ftp://ftp.ensembl.org/pub/release-98/fasta/danio_rerio/cdna/Danio_rerio.GRCz11.cdna.all.fa.gz
+  #   name: GRCz
+  #   version: '11'
+  #   accessed: '2019-12-19T07:00:00+01:00'
+  #   provider: ENSEMBL
+  #   website: http://www.ensembl.org/Danio_rerio/Info/Index
+  #   cite: ""
+output: "/data"
+bowtieFiletypes:
+  - 1.ebwt
+  - 2.ebwt
+  - 3.ebwt
+  - 4.ebwt
+  - rev.1.ebwt
+  - rev.2.ebwt

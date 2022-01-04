@@ -1,0 +1,1131 @@
+---
+title: "miND - miRNA NGS data pipeline"
+output:
+  html_document:
+    theme: flatly
+    css: !expr paste(getwd(), '../../scripts/res/style.css', sep='/')
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    mathjax: null
+    fig_width: 9
+    fig_height: 7
+bibliography: "`r paste(getwd(), 'scripts/res/bibliography.bib', sep='/')`"
+nocite: '@*'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, results='hide', echo=FALSE, warning=FALSE, message=FALSE}
+startTime <- Sys.time()
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%")
+
+# debug and dev settings
+if(!exists("snakemake")) {
+  debugInputFile <- "/mnt/storage/workspace/dev/mind-public/testdata/data1/Testdata_data1_SampleContrastSheet.xlsx"
+  debugOutputPath <- "/mnt/storage/workspace/dev/mind-public/output/Testdata_data1"
+
+  sampleSheetFileVar <- debugInputFile
+  sampleMappingQuantificationsVar <- paste(debugOutputPath, "analysis_quantifySampleMappings/all_samples.dat", sep="/")
+  csvGenomeMappingVar <- paste(debugOutputPath, "analysis_quantifySampleMappings/all_samples_genome_mapping.csv", sep="/")
+  mirnaMappingStatsVar <- paste(debugOutputPath, "analysis_sampleMappingStats/all_samples.csv", sep="/")
+  mirnaMappingStatsRPMVar <- paste(debugOutputPath, "analysis_sampleMappingStats/all_samples_rpm_miRNA.csv", sep="/")
+  deDirVar <- paste(debugOutputPath, "analysis_differentialExpression/", sep="/")
+  spikeInAnalysis <- FALSE
+  alpha <- 0.05
+
+  source("../scripts/common.R")
+} else {
+  sampleSheetFileVar <- snakemake@input["sampleSheetFile"]
+  sampleMappingQuantificationsVar <- snakemake@input["sampleMappingQuantifications"]
+  csvGenomeMappingVar <- snakemake@input["csvGenomeMapping"]
+  mirnaMappingStatsVar <- snakemake@input["mirnaMappingStats"]
+  mirnaMappingStatsRPMVar <- snakemake@input["mirnaMappingStatsRPM"]
+  deDirVar <- snakemake@input["deDir"]
+  spikeInAnalysis = FALSE
+  alpha <- as.numeric(snakemake@config['alpha'])
+  
+  source("scripts/common.R")
+}
+
+library("tidyr")
+library("dplyr")
+library("tibble")
+library("ggplot2")
+library("ggfortify")
+library("gridExtra")
+library("magrittr")
+library("stringr")
+library("readr")
+library("readxl")
+library("ggrepel")
+library("edgeR")
+library("kableExtra")
+library("DT")
+library("plotly")
+library("genefilter")
+library("pheatmap")
+library("RColorBrewer")
+library("pcaMethods")
+library("WriteXLS")
+library("Rtsne")
+
+if (deDirVar != "NULL") {
+  showDE <- TRUE
+} else {
+  showDE <- FALSE
+}
+```
+<p>&nbsp;</p>
+<center>
+![](`r if(exists("snakemake")) paste(snakemake@scriptdir, 'res/mind_3.png', sep="/")`)
+</center>
+
+<br /><br />
+miND - miRNA NGS Data pipeline by [TAmiRNA GmbH](https://www.tamirna.com), developed by: [Andreas B. Diendorfer, PhD](https://www.linkedin.com/in/andreas-diendorfer)<br />
+
+# Introduction
+This miND report provides a condensed overview of the mapping and (if requested) differential expression analysis of the provided samples. Details on the analysis parameters are listed below:
+
+* Project ID: `r if(exists("snakemake")) snakemake@config['projectID']`
+* Report generated: `r format(Sys.time(), '%Y-%m-%d (%H:%M:%S GTM %z)')` by system user "`r Sys.info()['user']`"
+
+`r if(exists("snakemake") && snakemake@config['projectComment'] != "") {paste0('\n\nComment:\n\n***\n\n', snakemake@config['projectComment'], '\n\n***\n\n')}`
+
+Analysis parameters:
+
+* Species: `r if(exists("snakemake")) snakemake@config['speciesName']` (`r if(exists("snakemake")) snakemake@config['speciesCode']`, TXID: [`r if(exists("snakemake")) snakemake@config['speciesTxid']`](https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?mode=Info&id=`r if(exists("snakemake")) snakemake@config['speciesTxid']`))
+* Sequencing adapter: `r if(exists("snakemake")) snakemake@config['adapterName']` (cutadapt `r if(exists("snakemake")) snakemake@config['adapter']`)
+* Minimum read length: `r if(exists("snakemake")) snakemake@config['readMinLength']`nt
+* Reads quality cutoff: `r if(exists("snakemake")) snakemake@config['qualityCutoff']` (phred quality score)
+* Significance level: `r alpha`
+
+Tabular data can be filtered or sorted using the fields and options at the top of each table. To export the data for further processing, please select the desired format (Excel or CSV) at the table.
+
+# Data exploration
+
+The first part of this report aims to give a general overview of the sequencing data. Please be aware, that any downstream analysis depends on certain assumptions on the distribution and quality of the data. It is important to manually evaluate the data with the plots and tables provided in this section. Samples that do not pass those evaluations should be excluded from statistical analysis, as they can distort the results.
+
+## Sample table
+```{r sampleTable}
+sampleSheetContrast <- read_excel(as.character(sampleSheetFileVar), sheet = "Contrast Selection") %>% drop_na(c(2, 3))
+sampleSheetSamples <- read_excel(as.character(sampleSheetFileVar), sheet = "Sample Group Matrix") %>%
+  drop_na(c(2, 3)) %>%
+  select(1:7)
+
+sampleSheetSamples$Filename %<>% gsub("'", "", .) %>%
+  gsub(".fastq.gz", "", .) %>%
+  gsub(".fastq", "", .) %>%
+  gsub(".fq.gz", "", .) %>%
+  gsub(".fq", "", .) %>%
+  gsub(".bam", "", .)
+
+sampleSheetSamples$sampleID[is.na(sampleSheetSamples$sampleID)] <-
+  sampleSheetSamples$Filename[is.na(sampleSheetSamples$sampleID)]
+
+sampleSheetSamples$sampleID <- as.character(sampleSheetSamples$sampleID)
+
+sampleSheetSamples %<>%
+  select_if(~!all(is.na(.)))
+
+sampleSheetSamples %>%
+  datatable(
+    extensions = "Buttons",
+    rownames = FALSE,
+    options = list(
+      dom = "Bfrtlip",
+      buttons = list("copy", list(extend = "csv", filename = "sampleSheet"), list(extend = "excel", filename = "sampleSheet"))
+    )
+  )
+
+sampleNamesWithGroup <- sampleSheetSamples %>%
+  unite(sampleIDWG, sampleID, 3, sep = " @ ", remove = FALSE) %>%
+  select(1, 2)
+```
+
+## Raw data quality control
+
+To evaluate the quality and check the data for common sequencing problems, all processed files are also analysed with the "fastQC" tool. The results of all samples are then combined into one report together with statistics about the adapter trimming step.
+
+The multiQC report was provided alongside with this file (multiqc_report.html).
+
+Any files that do not pass the manual evaluation of this step should be excluded from further processing and analysis, as they could distort the results.
+
+## Reads classification {.tabset .tabset-fade .tabset-pills}
+
+Reads classification gives insights into the type and origin (i.e. composition) of all sequences obtained for each sample. After processing of the reads (adapter trimming, quality filtering, size filtering), all reads are mapped against various databases to categorize them. This is done in a hierarchical process, where reads are first mapped against the genome. Genome mapped reads are then mapped against known miRNA sequences and only those not identified as miRNAs get mapped against other databases for further classification.
+
+"Unclassified genomic" indicates reads that were mapped against the genome but were not found in any of the RNA specific databases, while "unmapped" are reads that could not be found in the given reference genome.
+
+The "Relative reads" tab shows the same data scaled to 100% to indicate the relative abundance of each read classification in a given sample.
+
+Hint: You can double click on any of the RNA categories in the legend to hide all other and only show this one category.
+
+### Absolute reads
+```{r readCountStatisticsAbsolute}
+  tbl <- paste0(dirname(as.character(sampleMappingQuantificationsVar)), "/all_samples.dat") %>%
+    read_delim(delim = "\t") %>%
+    mutate(group = factor(group), lib = factor(lib, levels = unique(lib))) %>%
+    unite(sampleIDWG, sample, group, sep = " @ ", remove = FALSE) %>%
+    arrange(group, sample)
+
+  tbl %>%
+    plot_ly(
+      x = ~sampleIDWG,
+      y = ~reads,
+      type = "bar",
+      fillcolor = ~lib
+    ) %>%
+    layout(
+      title = "Reads composition (absolute)",
+      xaxis = list(
+        title = "Sample",
+        tickangle = -90,
+        categoryorder = "array",
+        categoryarray = ~group
+      ),
+      yaxis = list(title = "Read count"),
+      barmode = "stack",
+      hovermode = "compare",
+      colorway = cbp1,
+      margin = list(b = max(nchar(tbl$sampleIDWG)) * 4.5)
+    )
+```
+
+### Read composition (relative)
+```{r readCountStatisticsPercent}
+  tbl <- paste0(dirname(as.character(sampleMappingQuantificationsVar)), "/all_samples_perc.dat") %>%
+    read_delim(delim = "\t") %>%
+    mutate(group = factor(group), lib = factor(lib, levels = unique(lib))) %>%
+    unite(sampleIDWG, sample, group, sep = " @ ", remove = FALSE) %>%
+    arrange(group, sample)
+  tbl %>%
+    plot_ly(
+      x = ~sampleIDWG,
+      y = ~reads,
+      type = "bar",
+      fillcolor = ~lib
+    ) %>%
+    layout(
+      title = "Reads composition (relative)",
+      xaxis = list(
+        title = "Sample",
+        tickangle = -90,
+        categoryorder = "array",
+        categoryarray = ~group
+      ),
+      yaxis = list(title = "% of total reads"),
+      barmode = "stack",
+      hovermode = "compare",
+      colorway = cbp1,
+      margin = list(b = max(nchar(tbl$sampleIDWG)) * 4.5)
+    )
+mappingStatisticsFigHeight <- 1.5 * ceiling(nrow(sampleSheetSamples) / 2)
+```
+
+### Mapping statistics
+The following histograms show the number (y-axis) of genome mapped reads against their length (x-axis) for each sample. The stacked bar charts visualize the proportions of unmapped and mapped reads and can be used to evaluate the read quality. Most microRNAs are 22 nucleotides long.
+
+```{r mappingStatistics,  fig.height=mappingStatisticsFigHeight}
+
+data <- paste0(as.character(csvGenomeMappingVar)) %>%
+  read_delim(delim = "\t") %>% rename(sampleID = sample)
+
+data$sampleID <- as.character(data$sampleID)
+data <- data %>%
+  left_join(sampleSheetSamples, by = "sampleID") %>%
+  select(sampleID, length, stat, count, 6) %>%
+  unite(sampleID, sampleID, 5, sep = " @ ", remove = TRUE) %>%
+  select(sampleID, length, stat, count)
+
+data %>% ggplot(aes(x = length, y = count)) +
+  geom_col(aes(fill = stat), width = 0.7) +
+  facet_wrap(~sampleID, scales = "free", ncol = 2) +
+  xlab("Read length") +
+  ylab("Count") +
+  theme_light() +
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  scale_fill_manual(values = c(cbp1[2], cbp1[1])) +
+  scale_x_continuous(breaks = seq(0, max(data$length) + 1, by = 5))
+```
+
+## Read classification table
+
+The data in this table are equivalent to the data shown in the reads classification graph above (absolute reads). These are raw read counts (without any normalization).
+
+```{r readClassificationTable}
+paste0(dirname(as.character(sampleMappingQuantificationsVar)), "/all_samples.csv") %>%
+  read_delim(delim = "\t") %>%
+  rename(sampleID = sample, Group = group) %>%
+  datatable(
+    extensions = "Buttons",
+    rownames = FALSE,
+    options = list(
+      dom = "Bfrtlip",
+      buttons = list("copy", list(extend = "csv", filename = "readsClassificationTable"), list(extend = "excel", filename = "readsClassificationTable")),
+      scrollX = TRUE
+    )
+  ) %>%
+  formatRound(3:17, digits = 0, mark = "&nbsp;")
+```
+
+## miRNA mappings {.tabset .tabset-fade .tabset-pills}
+
+### miRNA RPM table
+This table contains all identified miRNAs in each sample. Read counts are normalized to 1 million mapped miRNAs.
+
+Please use the download link provided underneath the table to save the miRNA mappings data. The buttons provided at the top of the table can also be used, but won't include detailed group information of the samples.
+
+```{r identifiedmiRNAsRPM}
+
+miRNAs <- paste0(as.character(mirnaMappingStatsRPMVar)) %>%
+  read_delim(delim = "\t") %>%
+  column_to_rownames("ID")
+miRNAs <- miRNAs[rowSums(miRNAs[, -1]) > 0, ]
+
+samples <- as_tibble(list(sampleID = as.character(colnames(miRNAs)))) %>% left_join(sampleSheetSamples, "sampleID")
+groups <- colnames(sampleSheetSamples %>% select(-sampleID, -Filename))
+
+miRNAs %>% datatable(
+  extensions = "Buttons",
+  rownames = TRUE,
+  options = list(
+    dom = "Bfrtlip",
+    buttons = list("copy", list(extend = "csv", filename = "miRNAsRPMTable"), list(extend = "excel", filename = "miRNAsRPMTable")),
+    scrollX = TRUE,
+    autoWidth = TRUE,
+    columnDefs = list(list(width = "100px", targets = c(0)))
+  ),
+  container = htmltools::withTags(table(
+    class = "display",
+    thead(
+      lapply(groups, function(group) {
+        tr(
+          th(group),
+          lapply(c(samples[, group])[[1]], th)
+        )
+      }),
+      tr(
+        th("sampleID"),
+        lapply(samples$sampleID, th)
+      )
+    )
+  ))
+)
+
+# this whole block is neede to generate a XLS file of the mapped miRNAs with the group information embedded. datatable can not include complex headers in the xls/csv export, so we have to do it on our own
+sampleGroups <- t(samples %>% select(-sampleID, -Filename)) %>% as_tibble(rownames = NA)
+colnames(sampleGroups) <- samples$sampleID
+
+xls <- bind_rows(sampleGroups, as_tibble(miRNAs %>% mutate_all(as.character))) %>%
+  add_column("rownames" = c(groups, rownames(miRNAs))) %>%
+  column_to_rownames("rownames")
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(xls,
+  ExcelFileName = xlsFilename, SheetNames = c("RPM"),
+  col.names = TRUE, row.names = TRUE
+)
+xfun::embed_file(xlsFilename, name = "miRNAsRPMTable.xlsx", text = "Download extended miRNA mapping table (RPM)")
+```
+
+### miRNA raw reads table
+This table contains all identified miRNAs in each sample. These are raw read counts (without any normalization).
+
+Please use the download link provided underneath the table to save the miRNA mappings data. The buttons provided at the top of the table can also be used, but won't include detailed group information of the samples.
+
+```{r identifiedmiRNAs}
+
+miRNAs <- paste0(as.character(mirnaMappingStatsVar)) %>%
+  read_delim(delim = "\t") %>%
+  column_to_rownames("ID")
+miRNAs <- miRNAs[rowSums(miRNAs[, -1]) > 0, ] # remove rows with zero reads in all samples
+
+samples <- as_tibble(list(sampleID = as.character(colnames(miRNAs)))) %>% left_join(sampleSheetSamples, "sampleID")
+groups <- colnames(sampleSheetSamples %>% select(-sampleID, -Filename))
+
+miRNAs %>% datatable(
+  rownames = TRUE,
+  options = list(
+    dom = "Bfrtlip",
+    buttons = list("copy", list(extend = "csv", filename = "miRNAsTable"), list(extend = "excel", filename = "miRNAsTable")),
+    scrollX = TRUE,
+    autoWidth = TRUE,
+    columnDefs = list(list(width = "100px", targets = c(0)))
+  ),
+  container = htmltools::withTags(table(
+    class = "display",
+    thead(
+      lapply(groups, function(group) {
+        tr(
+          th(group),
+          lapply(c(samples[, group])[[1]], th)
+        )
+      }),
+      tr(
+        th("sampleID"),
+        lapply(samples$sampleID, th)
+      )
+    )
+  ))
+)
+
+# this whole block is neede to generate a XLS file of the mapped miRNAs with the group information embedded. datatable can not include complex headers in the xls/csv export, so we have to do it on our own
+sampleGroups <- t(samples %>% select(-sampleID, -Filename)) %>% as_tibble(rownames = NA)
+colnames(sampleGroups) <- samples$sampleID
+
+xls <- bind_rows(sampleGroups, as_tibble(miRNAs %>% mutate_all(as.character))) %>%
+  add_column("rownames" = c(groups, rownames(miRNAs))) %>%
+  column_to_rownames("rownames")
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(xls,
+  ExcelFileName = xlsFilename, SheetNames = c("RawReads"),
+  col.names = TRUE, row.names = TRUE
+)
+xfun::embed_file(xlsFilename, name = "miRNAsTable.xlsx", text = "Download extended miRNA mapping table (raw reads)")
+```
+
+### Identified miRNAs comparison
+This graph shows the amount of distinct mature miRNAs identified in each sample.
+
+```{r identifiedmiRNAsGraph, fig.height=4}
+miRNAsLong <- miRNAs %>%
+  rownames_to_column("miRNA") %>%
+  filter(!grepl("^#", miRNA)) %>% # remove spikeins
+  pivot_longer(-miRNA, names_to = "sampleID", values_to = "reads")
+miRNAsLong %<>%
+  left_join(sampleSheetSamples, by = "sampleID") %>% # add the groups to the table
+  select(-Filename) %>%
+  unite(sampleID, sampleID, 4, sep = " @ ", remove = FALSE) %>%
+  select(miRNA, sampleID, reads, group = 4)
+
+miRNAsDistinct <- miRNAsLong %>%
+  filter(reads > 0) %>%
+  group_by(sampleID, group) %>%
+  count() %>%
+  add_column(set = "> 0")
+miRNAsDistinctMin <- miRNAsLong %>%
+  filter(reads > 10) %>%
+  group_by(sampleID, group) %>%
+  count() %>%
+  add_column(set = "> 10")
+miRNAsDistinctJoined <- miRNAsDistinct %>% bind_rows(miRNAsDistinctMin)
+miRNAsDistinctJoined <- miRNAsDistinctJoined %>% dplyr::arrange(group)
+
+p <- plot_ly(miRNAsDistinctJoined, x = ~sampleID, y = ~n, type = "bar", fillcolor = ~set) %>%
+  layout(
+    title = "Distinct mapped miRNAs",
+    xaxis = list(
+      title = "Sample",
+      tickangle = -90,
+      categoryorder = "array",
+      categoryarray = miRNAsDistinctJoined$group
+    ),
+    yaxis = list(title = "Number of distinct miRNAs"),
+    barmode = "group",
+    hovermode = "compare",
+    colorway = cbp1
+  )
+p
+
+# make download link for this plot
+tmpFile <- tempfile(fileext = ".xlsx")
+WriteXLS(miRNAsDistinctJoined,
+  ExcelFileName = tmpFile, SheetNames = c("Sheet1"),
+  col.names = TRUE, row.names = TRUE
+)
+xfun::embed_file(tmpFile, name = "IdentifiedmiRNAsComparison.xlsx", text = "Download identified miRNAs comparison data")
+```
+
+
+### miRNA read count distribution
+This overview plots the abundance of a miRNA (collapsed read count) on the x axis and the amount of other miRNAs in this range on the y axis. It illustrates the distribution of miRNAs in the sample.
+
+```{r readCountDistributionPrep}
+readCountDistributionFigHeight <- 1.2 * ceiling(nrow(sampleSheetSamples) / 4)
+```
+
+```{r readCountDistribution, fig.height=readCountDistributionFigHeight}
+miRNAmappingStats <- mirnaMappingStatsVar
+
+data <- paste0(dirname(as.character(miRNAmappingStats)), "/all_samples_rpm_dist.dat") %>%
+  read_delim(delim = "\t") %>%
+  filter(!grepl("^#", ID)) %>% # remove spikeins
+  rename(sampleID = Sample, miRNA = ID)
+
+data$sampleID <- as.character(data$sampleID)
+data <- data %>%
+  left_join(sampleSheetSamples, by = "sampleID") %>% # add the groups to the table
+  select(-Filename) %>%
+  unite(sampleID, sampleID, 4, sep = " @ ", remove = TRUE) %>%
+  select(miRNA, sampleID, count)
+data %>%
+  ggplot(aes(x = count)) +
+  geom_histogram(position = "identity", bins = 20) +
+  scale_x_log10() +
+  facet_wrap(~sampleID, ncol = 4) +
+  xlab("RPM") +
+  ylab("miRNA reads distribution") +
+  theme_light()
+```
+
+## Heatmaps {.tabset .tabset-fade .tabset-pills}
+
+Data is based on RPM normalized reads and scaled using the unit variance method for visualization in heatmaps. Clustering is done using the average method of pheatmap calculating the distances as correlations.
+
+### Top 50 miRNAs
+
+This heatmap shows only the top 50 miRNAs (based on coefficient of variation (CV%)). An additional filter was introduce to increase the robustness: only miRNAs that show an RPM in at least 1 / n(groups) percent of samples (e.g. with 4 groups, the miRNA has to have an RPM value above 5 in at least 25% of the samples). This removes miRNAs that have a high CV but are only expressed in a too small amount of samples to bear any statistical significance or biological relevance.
+
+```{r heatmapTop}
+filename <- mirnaMappingStatsRPMVar
+colVec <- colorRampPalette(rev(brewer.pal(11, "Spectral")))(100)
+reads <- paste0(as.character(filename)) %>%
+  read_delim(delim = "\t") %>%
+  filter(!grepl("^#", ID)) %>% # remove spike ins that all start with a # so that we don't have them in the PCA and other plots
+  column_to_rownames("ID")
+reads <- reads[rowSums(reads[, -1]) > 0, ]
+ids <- rownames(reads)
+
+# this block is used to get a list of miRNAs that have non zero values in at least 1/n(groups) of the samples
+# withouth this filter, the amount of very low read count miRNAs take up all the space in the heatmap
+percCutoff <- 1 / (nrow(unique(sampleSheetSamples[, 3])))
+# percCutoff <- 1
+relevantGenes <- reads %>%
+  rownames_to_column("ID") %>%
+  gather(key = "sample", value = "reads", -ID) %>%
+  group_by(ID) %>%
+  summarize(
+    samples = n(),
+    samples_gt0 = sum(reads > 5),
+    psamples_gt0 = samples_gt0 / samples
+  ) %>%
+  filter(psamples_gt0 >= percCutoff)
+
+reads %<>% mutate(
+  Mean = rowMeans(.),
+  SD = rowSds(.)
+) %>%
+  mutate(coeffV = SD / Mean)
+rownames(reads) <- ids
+
+groups <- sampleSheetSamples[c(1, 3:ncol(sampleSheetSamples))] %>%
+  unite(sampleIDWG, sampleID, 2, sep = " @ ", remove = FALSE) %>%
+  column_to_rownames("sampleIDWG") %>%
+  select(-sampleID)
+
+readsTop <- readsAllRelevant <- reads[relevantGenes$ID, ]
+readsTop <- readsTop %>%
+  rownames_to_column("ID") %>%
+  top_n(50) %>%
+  select(-Mean, -SD, -coeffV) %>%
+  column_to_rownames("ID")
+readsAllRelevant %<>% select(-Mean, -SD, -coeffV)
+reads %<>% select(-Mean, -SD, -coeffV)
+
+t <- readsAllRelevant %>%
+  t() %>%
+  as_tibble(rownames = NA) %>%
+  rownames_to_column("sampleID")
+# t$sampleID <- as.numeric(t$sampleID)
+t %<>% left_join(sampleNamesWithGroup, by = "sampleID") %>%
+  column_to_rownames("sampleIDWG") %>%
+  select(-sampleID)
+rowNames <- rownames(t(t))
+readsAllRelevant <- t %<>% t() %>%
+  as_tibble(rownames = NA) %>%
+  add_column(ID = rowNames) %>%
+  column_to_rownames("ID")
+
+t <- readsTop %>%
+  t() %>%
+  as_tibble(rownames = NA) %>%
+  rownames_to_column("sampleID")
+# t$sampleID <- as.numeric(t$sampleID)
+t %<>% left_join(sampleNamesWithGroup, by = "sampleID") %>%
+  column_to_rownames("sampleIDWG") %>%
+  select(-sampleID)
+rowNames <- rownames(t(t))
+readsTop <- t %<>% t() %>%
+  as_tibble(rownames = NA) %>%
+  add_column(ID = rowNames) %>%
+  column_to_rownames("ID")
+
+scaledAll <- prep(t(readsAllRelevant), scale = "uv", center = TRUE)
+scaledAll <- t(scaledAll)
+scaledTop <- prep(t(readsTop), scale = "uv", center = TRUE)
+scaledTop <- t(scaledTop)
+
+annotationColors <- list()
+n <- lapply(colnames(groups), function(group) {
+  cols <- colorRampPalette(brewer.pal(length(unique(groups[, group])), "Set1"))
+
+  annotationColors[[group]] <<- cols(length(unique(groups[, group])))
+  names(annotationColors[[group]]) <<- unique(groups[, group])
+})
+
+pheatmap(scaledTop,
+  annotation_col = groups,
+  annotation_colors = annotationColors,
+  #        cutree_cols = 1,
+  color = colorRampPalette(rev(brewer.pal(n = 8, name = "RdBu")))(100),
+  clustering_distance_rows = "correlation",
+  clustering_distance_cols = "correlation",
+  clustering_method = "average",
+  show_rownames = FALSE,
+  border_color = NA,
+  angle_col = 90,
+  fontsize_col = 6
+)
+
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(readsTop,
+  ExcelFileName = xlsFilename, SheetNames = c("RPM reads"),
+  col.names = TRUE, row.names = TRUE
+)
+xfun::embed_file(xlsFilename, name = "heatmapReadsTopN.xlsx", text = "Download data used to generate the heatmap")
+```
+
+### All miRNAs
+`r nrow(scaledAll)` miRNAs are shown in the following heatmap, based on the same filters described at the top 50 miRNAs.
+
+```{r heatmapAll}
+pheatmap(scaledAll,
+  annotation_col = groups,
+  annotation_colors = annotationColors,
+  #        cutree_cols = 1,
+  color = colorRampPalette(rev(brewer.pal(n = 8, name = "RdBu")))(100),
+  clustering_distance_rows = "correlation",
+  clustering_distance_cols = "correlation",
+  clustering_method = "average",
+  show_rownames = FALSE,
+  border_color = NA,
+  angle_col = 90,
+  fontsize_col = 6
+)
+
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(readsAllRelevant,
+  ExcelFileName = xlsFilename, SheetNames = c("RPM reads"),
+  col.names = TRUE, row.names = TRUE
+)
+xfun::embed_file(xlsFilename, name = "heatmapReadsAll.xlsx", text = "Download data used to generate the heatmap")
+
+```
+
+
+## PCA {.tabset .tabset-fade .tabset-pills}
+
+Principal component analysis (PCA) uses RPM normalized miRNA reads and reduces the data dimensions down to two, so that it can be plotted in a graph. A quick introduction to PCA plots and the underlaying principle, can be found [here](http://setosa.io/ev/principal-component-analysis/).
+
+Samples are either colored by their first group or by the cluster they were assigend to. Clustering is done using the ward (ward.D2) alrogithm of hclust (split at euclidian cluster height of 40).
+
+```{r pca}
+readsT <- t(readsAllRelevant)
+readsPC <- prcomp(readsT, scale = TRUE) # princomp
+cumsum <- cumsum(readsPC$sdev^2 / sum(readsPC$sdev^2))
+
+readsHC <- hclust(dist(readsPC$x), method = "ward.D2")
+readsClusters <- cutree(readsHC, h = 40)
+readsDf <- data.frame(readsPC$x,
+  cluster = factor(readsClusters)
+)
+
+idsToGroup <- groups %>% rename("group1" = 1)
+if (ncol(idsToGroup) >= 2) {
+  idsToGroup %<>% rename("group2" = 2)
+} else {
+  idsToGroup$group2 <- NA
+}
+idsToGroup %<>% rownames_to_column("sampleID")
+readsDf %<>% rownames_to_column("sampleID") %>% left_join(idsToGroup, by = "sampleID")
+readsDf <- transform(readsDf, cluster_name = paste("Cluster", readsClusters))
+```
+
+### PCA cluster by sample groups
+
+``` {r pcaSampleCluster, eval=TRUE}
+plot_ly(readsDf,
+  x = ~PC1,
+  y = ~PC2,
+  color = ~group1,
+  symbol = ~group2,
+  text = ~sampleID,
+  mode = "markers",
+  marker = list(size = 11),
+  colorway = cbp1
+) %>%
+  layout(
+    title = "PCA clusters from sample groups",
+    xaxis = list(title = paste0("PC1: ", round(cumsum[1] * 100, 2), "% variance")),
+    yaxis = list(title = paste0("PC2: ", round((cumsum[2] - cumsum[1]) * 100, 2), "% variance"))
+  )
+```
+
+### PCA cluster by hierarchical clustering
+
+``` {r pcaGroupCluster}
+plot_ly(readsDf,
+  x = ~PC1,
+  y = ~PC2,
+  color = ~cluster_name,
+  symbol = ~group1,
+  text = rownames(readsDf),
+  mode = "markers",
+  marker = list(size = 11),
+  colorway = cbp1
+) %>%
+  layout(
+    title = "PCA clusters from hierachical clustering",
+    xaxis = list(title = paste0("PC1: ", round(cumsum[1] * 100, 2), "% variance")),
+    yaxis = list(title = paste0("PC2: ", round((cumsum[2] - cumsum[1]) * 100, 2), "% variance"))
+  )
+
+# get sample to cluster assignments
+groupToCluster <- readsDf %>%
+  rename(!!colnames(groups)[1] := group1)
+
+if (ncol(groups) >= 2) {
+  groupToCluster %<>%
+  rename(!!colnames(groups)[2] := group2)
+}
+
+groupToCluster %<>%
+  select(-starts_with("PC"), -cluster, `Cluster Name` = cluster_name)
+
+groupToCluster %>% datatable(
+  extensions = "Buttons",
+  rownames = FALSE,
+  options = list(
+    dom = "Bfrtlip",
+    buttons = list("copy", list(extend = "csv", filename = "PCAClusterAssignment"), list(extend = "excel", filename = "PCAClusterAssignment"))
+  )
+)
+
+```
+
+## t-SNE
+t-SNE is a nonlinear dimensionality reduction technique well-suited for embedding high-dimensional data for visualization in a low-dimensional space (like 2 dimensions here). It models each high-dimensional object by a two- or three-dimensional point in such a way that similar objects are modeled by nearby points and dissimilar objects are modeled by distant points with high probability. More details can be found in the author's publication [@VanderMaaten2008].
+
+```{r tsne}
+groupVector <- groups %>% rownames_to_column("id") %>% arrange(id)
+
+# calculate perplex value (should be smaller than (N-1)/3)
+perplexVal <- floor((length(reads)-1) / 3)
+if(perplexVal > 0) {
+  p <- tsne(reads,
+            colvec = c("violet"),
+            dotsize = 3,
+            labels=as.factor(groupVector[[2]]),
+            text=as.factor(groupVector[[1]]),
+            textlabelsize = 0.4,
+            axistextsize = 11,
+            legendtextsize = 11,
+            seed = 29984438,
+            perplex = perplexVal)
+  ggplotly(p)
+}
+```
+
+```{r de, results='asis', eval = showDE}
+cat("# Differential expression analysis {.tabset .tabset-fade .tabset-pills}
+
+  Differential expression analysis uses statistical tests to find miRNAs that are over or underexpressed in a group. For this report, the well established analysis toolkit edgeR [@Robinson2009] was used.
+
+  Annotations in this result are standardized, as that for a contrast of GroupA vs. GroupB a positive logFC indicates that the miRNA is upregulated in groupA. E.g. a logFC of 2.5 equals an increase of miRNA by the factor of 2^2.5 = 5.66.
+
+  Please select a contrast below to view the differential expression analysis results.")
+
+dirname <- as.character(deDirVar)
+contrasts <- list.dirs(dirname, full.names = F)
+contrasts <- contrasts[contrasts != "logs"]
+contrasts <- contrasts[contrasts != ""]
+
+deSummary <- tibble("contrast" = character(), "direction" = character(), "amount" = double())
+
+for (i in 1:length(contrasts)) {
+  contrast <- contrasts[i]
+  contrastPath <- paste(dirname, contrast, sep = "/")
+
+  contrastPretty <- gsub("[A-Za-z0-9]*#", "", contrast) %>% # remove the groupIDs and leave only the levels
+    str_replace_all("_vs_", " versus ") %>%
+    str_replace_all("_on_", " blocking ") %>%
+    str_replace_all("&", " & ")
+
+  contrastDetails <- paste0(contrastPath, "/deContrastDetails.csv") %>%
+    read_delim(delim = "\t")
+
+  cat("  \n\n##", contrastPretty, "  \n\n")
+  cat("  \n\n### Sample overview {.tabset .tabset-fade .tabset-pills}  \n\n")
+  cat("  \n\nThe following two tables give a quick overview of the samples that were part of the two groups compared in this contrast.\n\n")
+  cat("  \n\n#### Samples group A  \n\n")
+  tbl <- paste0(contrastPath, "/groupASamples.csv") %>%
+    read_delim(delim = "\t") %>%
+    datatable(
+      extensions = "Buttons",
+      rownames = FALSE,
+      options = list(
+        dom = "Bfrtlip",
+        buttons = list("copy", list(extend = "csv", filename = "groupASamples"), list(extend = "excel", filename = "groupASamples")),
+        pageLength = 25,
+        scrollX = TRUE
+      ),
+      height = "auto",
+      width = "100%"
+    )
+  print(htmltools::tagList(tbl))
+  cat("  \n\n#### Samples group B  \n\n")
+  tbl <- paste0(contrastPath, "/groupBSamples.csv") %>%
+    read_delim(delim = "\t") %>%
+    datatable(
+      extensions = "Buttons",
+      rownames = FALSE,
+      options = list(
+        dom = "Bfrtlip",
+        buttons = list("copy", list(extend = "csv", filename = "groupBSamples"), list(extend = "excel", filename = "groupBSamples")),
+        pageLength = 25,
+        scrollX = TRUE
+      ),
+      height = "auto",
+      width = "100%"
+    )
+  print(htmltools::tagList(tbl))
+
+  cat("  \n\n#### Independent filtering  \n\n")
+  cat("  \n\nAs hundreds or even thousands of miRNAs are tested for each contrast, multiple testing adjustment is required to reduce the false discovery rate (FDR). This is traditionally done using p-value adjustment methods like Benjamini Hochberg (BH) with an arbitrary cutoff for low expressed miRNAs prior analysis. In this case, the BH method reduces the amount of false positives reliably, but at the same time, removing a great amount of valid observations. In addition, the cutoff for low expressed miRNAs might remove biologically relevant observations.   \n\n")
+  cat("  \n\nFiltering of reads should be done independent of the group assignments. This is to avoid the introduction of any bias for the downstream differential expression analysis.  \n\n")
+
+  cat("  \n\nIn order to give the highest sensitivity to our analysis, we have implemented a method of removing low read count miRNAs from the data set until a statistically relevant set of significant results remains. This approach of independent filtering is also [used by DESeq2](http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#indfilt) and provides the currently best established filtering method prior FDR adjustment. Assuming that most false-positives are caused by low abundant miRNAs, the algorithm removes quantiles of miRNAs from the low-abundance end and checks if the amount of significant miRNAs increases after BH adjustment. This would be the case if mostly false positives have been removed because BH adjustment would now be more sensitive and not remove as many true positives, increasing the overall amount of significant results.   \n\n")
+  if (file.exists(paste0(contrastPath, "/dePrefilteringStats.csv"))) {
+    cat("  \n\nThis method works reliably as long as there are any true positive results. If the result set consist only of false positives, then even after removing the low abundant results would not increase the amount of significant results (as there are no true positives to enrich). In this case the algorithm has a fallback, to filter for lowly expressed miRNAs prior DE and FDR adjustment: In a first step, we filter out miRNAs that are only expressed on very low levels: RPM smaller than 10 divided by the smallest library size in at least half the amount of samples of the smaller group. Those miRNAs carry no biological and statistical relevance [@Chen2016] as they have very low read counts in both groups.
+          \n\n")
+  }
+  cat("  \n\nThis plot visualizes the independent filtering method based on significant observations used for this contrast. The quantile of reads removed prior BH p-value adjustment is ploted on the x axis, while the amount of significant observations is shown on the y axis. The algorithm aims to optimize for the maximum amount of significant observations and picks the apropriate cutoff. \n\n
+  ")
+
+  if (file.exists(paste0(contrastPath, "/dePrefilteringStats.csv"))) {
+    prefilteringStats <- paste0(contrastPath, "/dePrefilteringStats.csv") %>% read_delim(delim = "\t")
+
+    cat(paste0("  \n\nPrefiltering set cutoff to ", round(prefilteringStats$rpmCutoff, 2), " RPM in at least ", prefilteringStats$minLibs, " samples. There were ", prefilteringStats$removeGenes, " low read count miRNAs removed, accounting\nfor ", round(prefilteringStats$removedRCPerc * 100, 4), "% (", prefilteringStats$removedRC, " reads absolute) of the total reads.\n\n "))
+
+    print(htmltools::tagList(xfun::embed_file(paste0(contrastPath, "/dePrefilteringRemovedGenes.csv"), name = "dePrefilteringRemovedMiRNAs.csv", text = "Download RPM table of prefiltering removed miRNAs")))
+  }
+
+  fdrData <- paste0(contrastPath, "/fdrAdjustmentThreshold.dat") %>%
+    read_delim(delim = "\t")
+
+  fdrStats <- paste0(contrastPath, "/fdrAdjustmentThreshold.stat") %>%
+    read_delim(delim = "\t")
+
+  cat(paste0("  \n\nFDR based cutoff (see graph) removed ", fdrStats$removeGenes, " low read count miRNAs, accounting\nfor ", round(fdrStats$removedRCPerc * 100, 4), "% (", fdrStats$removedRC, " reads absolute) of the total reads.\n\n "))
+
+  p <- ggplot(fdrData, aes(theta, numSigGenes)) +
+    geom_hline(yintercept = fdrStats$yIntercept, col = "darkgrey", lwd = 0.5) +
+    geom_vline(xintercept = fdrStats$xIntercept, col = "darkgrey", lwd = 0.5) +
+    geom_point(size = 0.5) +
+    geom_line(aes(fitX, fitY), color = "#e6194B", lwd = 0.5) +
+    coord_cartesian(xlim = c(0, 1)) +
+    labs(
+      title = "Threshold for optimal FDR correction",
+      x = "Quantile",
+      y = "# Significant Genes"
+    ) +
+    theme_light()
+  print(p)
+
+  cat("  \n\n### Differentially expressed miRNAs  \n\n")
+  cat("  \n\n This table shows only miRNAs that are significant differentially expressed (FDR < ", alpha, ").    \n\n")
+  tbl <- paste0(contrastPath, "/de_ttest_results.csv") %>%
+    read_delim(delim = "\t") %>%
+    filter(de != 0 & sig == 1) %>%
+    select("miRNA" = genes, "logFC", "logCPM", "F", "PValue", "FDR", "de", "sig") %>% # select only the rows without the edgeR values
+    arrange(PValue) %>% # use the absolute logFC for sorting
+    select(-de, -sig) %>% # then remove the absolute logFC because we don't want it in the table
+    datatable(
+      extensions = "Buttons",
+      rownames = FALSE,
+      options = list(
+        dom = "Bfrtlip",
+        buttons = list("copy", list(extend = "csv", filename = "differentiallyExpressedMiRNAs"), list(extend = "excel", filename = "differentiallyExpressedMiRNAs")),
+        pageLength = 25,
+        scrollX = TRUE
+      ),
+      height = "auto",
+      width = "100%"
+    ) %>%
+    formatSignif(2:6, digits = 2, mark = "&nbsp;")
+  print(htmltools::tagList(tbl))
+
+  cat("  \n\n### Volcano plot{.tabset .tabset-fade .tabset-pills}  \n\n")
+  cat("  \n\nThis graph visualizes the relation of the logFC (how much did a miRNA change in the groups) and the statistical significance of this change. miRNAs higher up have a smaller FDR value, while miRNAs more to the left or right of the center, show a greater differential expression.\n\n")
+
+  cat("  \n\n#### FDR based  \n\n")
+  data <- paste0(contrastPath, "/volcanoPlot.dat") %>%
+    read_delim(delim = "\t")
+
+  # volcano plot
+  xmax <- max(abs(data$logFC))
+  xmin <- -xmax
+
+  data$sig <- factor(data$sig)
+  data$sig <- recode(data$sig, `0` = "not significant", `1` = paste0("FDR < ", alpha))
+
+  p <- data %>% ggplot(aes(logFC, -log10(FDR), label = FDR)) +
+    theme_light() +
+    geom_point(aes(col = sig, text = genes), na.rm = TRUE) +
+    scale_color_manual(values = c("black", "#3cb44b"), labels = c("Not significant", paste0("FDR < ", alpha))) +
+    geom_hline(yintercept = -log10(alpha), col = "#3cb44b", linetype = "dashed") +
+    coord_cartesian(xlim = c(xmin, xmax)) +
+    labs(
+      title = "Volcano plot - Fold change vs. significance",
+      x = "logFC",
+      y = "-log(FDR)",
+      col = "Significance"
+    ) +
+    theme(legend.position = "bottom")
+  p %<>%
+    ggplotly(tooltip = c("genes", "label", "logFC"))
+
+  subchunkify(p, 7, 9)
+
+  cat("  \n\n#### p-value based  \n\n")
+  p <- data %>% ggplot(aes(logFC, -log10(PValue), label = PValue)) +
+    theme_light() +
+    geom_point(aes(col = sig, text = genes), na.rm = TRUE) +
+    scale_color_manual(values = c("black", "#3cb44b"), labels = c("Not significant", paste0("FDR < ", alpha))) +
+    coord_cartesian(xlim = c(xmin, xmax)) +
+    labs(
+      title = "Volcano plot - Fold change vs. significance (unadjusted)",
+      x = "logFC",
+      y = "-log(p-value)",
+      col = "Significance"
+    ) +
+    theme(legend.position = "bottom")
+  p %<>%
+    ggplotly(tooltip = c("genes", "label", "PValue", "logFC"))
+
+  # this is needed in order to get the plot height right. without it, it was always set to 400px
+  subchunkify(p, 7, 9)
+
+  cat("  \n\n### MA plot{.tabset .tabset-fade .tabset-pills}  \n\n")
+  cat("  \n\nMA plots visualize the relation of the mean expression (mean of expression counts in both groups on X axis = A) of a miRNA and it's difference between the two groups (logFc on the Y axis = M). Significantly differentially expressed miRNAs (FDR < ", alpha, ") are shown in red. This plot can be taken into account to check the expression levels of significantly differentially expressed miRNAs. \n\n")
+
+  # very simple but nice explaination of MA plot: https://reneshbedre.github.io/blog/ma.html
+
+  p <- data %>% ggplot(aes(logCPM, logFC, label = logCPM)) +
+    theme_light() +
+    geom_point(aes(col = sig, text = genes), na.rm = TRUE) +
+    scale_color_manual(values = c("black", "#3cb44b"), labels = c("Not significant", paste0("FDR < ", alpha))) +
+    geom_hline(yintercept = 0, col = "#0000CC", linetype = "dashed") +
+    labs(
+      title = "MA plot - Mean expression vs. fold change",
+      x = "logCPM",
+      y = "logFC",
+      col = "Significance"
+    ) +
+    theme(legend.position = "bottom")
+  p %<>%
+    ggplotly(tooltip = c("genes", "label", "FDR", "logFC"))
+
+  # this is needed in order to get the plot height right. without it, it was always set to 400px
+  subchunkify(p, 7, 9)  
+
+  cat("  \n\n### Top up- and down-regulated{.tabset .tabset-fade .tabset-pills}  \n\n")
+  cat("  \n\nTop up- and down-regulated miRNAs in the given contrast with their CPM values from edgeR. miRNAs are ordered by logFC (FDR < ", alpha, " only) starting with the greatest on the top left.\n\n
+  For miRNAs with no reads (CPM = 0) in a sample, the CPM was set to 1, so that they can be displayed in this logarithmic plot as a 0 on the y axis (as the log10 of 0 is undefined).
+  \n\n")
+
+  cat("  \n\n#### Top up-regulated miRNAs  \n\n")
+  # assignInNamespace("data.frame", data.frame, "ggplot2") # this is needed to avoid an error message about not using data_frame instead of data.frame
+
+  upReg <- TRUE
+  if (file.exists(paste0(contrastPath, "/topUpRegulatedmiRNA.dat"))) {
+    upgregulated <- paste0(contrastPath, "/topUpRegulatedmiRNA.dat") %>% read_delim(delim = "\t")
+    upgregulatedOrder <- paste0(contrastPath, "/topUpRegulatedmiRNANames.dat") %>% read_delim(delim = "\t")
+  } else if(file.exists(paste0(contrastPath, "/topUpRegulatedmiRNA.ns.dat"))) {
+    cat("  \n\nNo significantly up-regulated miRNAs found. The following differences are non significant!")
+    upgregulated <- paste0(contrastPath, "/topUpRegulatedmiRNA.ns.dat") %>% read_delim(delim = "\t")
+    upgregulatedOrder <- paste0(contrastPath, "/topUpRegulatedmiRNANames.ns.dat") %>% read_delim(delim = "\t")
+  } else {
+    upReg <- FALSE
+    cat("  \n\nNo up-regulated miRNAs found.  \n\n")
+  }
+
+  if(upReg == TRUE) {
+    p <- ggplot(
+      upgregulated,
+      aes(
+        x = genes,
+        y = cpm,
+        color = group,
+        fill = group
+      )
+    ) +
+      geom_point(position = position_jitterdodge(dodge.width = 0.9), size = 1) +
+      geom_boxplot(alpha = 0.5, outlier.color = NA, position = position_dodge(width = 0.9)) +
+      facet_wrap(~ factor(genes, levels = upgregulatedOrder[[1]], ordered = TRUE), scales = "free", ncol = 3) +
+      coord_trans(y = "log10") +
+      theme_light() +
+      labs(
+        title = paste0("Top ", length(unique(upgregulated$genes)), " upregulated miRNAs by logFC"),
+        x = "miRNA", y = "CPM", fill = "Group", color = "Group"
+      ) +
+      theme(legend.position = "bottom") +
+      guides(colour = guide_legend(ncol = 2))
+    print(p)
+  }
+
+  downReg <- TRUE
+  cat("  \n\n#### Top down-regulated miRNAs  \n\n")
+  if (file.exists(paste0(contrastPath, "/topDownRegulatedmiRNA.dat"))) {
+    downregulated <- paste0(contrastPath, "/topDownRegulatedmiRNA.dat") %>% read_delim(delim = "\t")
+    downgregulatedOrder <- paste0(contrastPath, "/topDownRegulatedmiRNANames.dat") %>% read_delim(delim = "\t")
+  } else if(file.exists(paste0(contrastPath, "/topDownRegulatedmiRNA.ns.dat"))) {
+    cat("  \n\nNo significantly down-regulated miRNAs found. The following differences are non significant!")
+    downregulated <- paste0(contrastPath, "/topDownRegulatedmiRNA.ns.dat") %>% read_delim(delim = "\t")
+    downgregulatedOrder <- paste0(contrastPath, "/topDownRegulatedmiRNANames.ns.dat") %>% read_delim(delim = "\t")
+  } else {
+    downReg <- FALSE
+    cat("  \n\nNo down-regulated miRNAs found.  \n\n")
+  }
+  if(downReg == TRUE) {
+    p <- ggplot(
+      downregulated,
+      aes(
+        x = genes,
+        y = cpm,
+        color = group,
+        fill = group
+      )
+    ) +
+      geom_point(position = position_jitterdodge(dodge.width = 0.9), size = 1) +
+      geom_boxplot(alpha = 0.5, outlier.color = NA, position = position_dodge(width = 0.9)) +
+      facet_wrap(~ factor(genes, levels = downgregulatedOrder[[1]], ordered = TRUE), scales = "free", ncol = 3) +
+      coord_trans(y = "log10") +
+      theme_light() +
+      labs(
+        title = paste0("Top ", length(unique(downregulated$genes)), " downregulated miRNAs by logFC"),
+        x = "miRNA", y = "CPM", fill = "Group", color = "Group"
+      ) +
+      theme(legend.position = "bottom") +
+      guides(colour = guide_legend(ncol = 2))
+    print(p)
+  }
+
+  cat("  \n\n### All miRNAs {.tabset .tabset-fade .tabset-pills} \n\n")
+  cat("  \n\n#### edgeR results \n\n")
+  cat("  \n\nThis table contains the results of the differential expression analysis for all tested miRNAs. Additional TMM values calculated by edgeR are provided at the edgeR test statistics table.  \n\n")
+  data <- paste0(contrastPath, "/de_ttest_results.csv") %>%
+    read_delim(delim = "\t") %>%
+    rename(miRNA = genes) %>%
+    select("miRNA", "logFC", "PValue", "FDR", "sig") # select only the rows without the edgeR values
+  tbl <- data %>%
+    arrange(PValue) %>% # use the PValue for sorting
+    datatable(
+      extensions = "Buttons",
+      rownames = FALSE,
+      options = list(
+        dom = "Bfrtlip",
+        buttons = list("copy", list(extend = "csv", filename = "DEtestStatistics"), list(extend = "excel", filename = "DEtestStatistics")),
+        pageLength = 10,
+        scrollX = TRUE
+      ),
+      height = "auto",
+      width = "100%"
+    ) %>%
+    formatSignif(2:4, digits = 4, mark = "&nbsp;") %>%
+    formatStyle(
+      "sig",
+      target = "row",
+      backgroundColor = styleEqual(c(0, 1), c("", "#7AC182"))
+    )
+  print(htmltools::tagList(tbl))
+
+  cat("  \n\n#### edgerR test statistics \n\n")
+  cat("  \n\nThis table contains the results of edgeR's glmQLFTest() method.  \n\n")
+  data <- paste0(contrastPath, "/de_ttest_results.csv") %>%
+    read_delim(delim = "\t") %>%
+    rename(miRNA = genes)
+  tbl <- data %>%
+    arrange(PValue) %>% # use the PValue for sorting
+    datatable(
+      extensions = "Buttons",
+      rownames = FALSE,
+      options = list(
+        dom = "Bfrtlip",
+        buttons = list("copy", list(extend = "csv", filename = "DEtestStatistics"), list(extend = "excel", filename = "DEtestStatistics")),
+        pageLength = 10,
+        scrollX = TRUE,
+        autoWidth = TRUE,
+        columnDefs = list(list(width = "100px", targets = c(0)))
+      ),
+      height = "auto",
+      width = "100%"
+    ) %>%
+    # formatSignif(2:6, digits=4, mark="&nbsp;") %>%
+    formatStyle(
+      "sig",
+      target = "row",
+      backgroundColor = styleEqual(c(0, 1), c("", "#7AC182"))
+    )
+  print(htmltools::tagList(tbl))
+
+  up <- nrow(data %>% filter(de == 1 & sig == 1))
+  down <- nrow(data %>% filter(de == -1 & sig == 1))
+
+  deSummary %<>%
+    add_row(contrast = contrastPretty, direction = "upregulated", amount = up) %>%
+    add_row(contrast = contrastPretty, direction = "downregulated", amount = down)
+}
+```
+
+```{r deSummary, results='asis', eval = showDE}
+cat("  \n\n# Summary of differential expression analysis  \n\n")
+if (sum(deSummary$amount) > 0) {
+  cat("  \n\nThe direction follows the previously mentioned annotation. So \"upregulated\" (logFC > 0) means that the miRNA is overexpressed in the first group of the contrast.  \n\n")
+
+  ## define contrast angle
+  contrastAngle <- 90
+  contrastMargin <- list(b = max(nchar(deSummary$contrast)) * 4.5)
+  if (length(contrasts) < 4) {
+    contrastAngle <- 0
+    contrastMargin <- 0
+  } else if (length(contrasts) < 6) {
+    contrastAngle <- 45
+    contrastMargin <- list(b = max(nchar(deSummary$contrast)) * 4.5)
+  }
+
+  deSummaryWide <- deSummary %>% pivot_wider(names_from = direction, values_from = amount)
+  deSummaryWide$contrast %<>% newline_vs_lables()
+  deSummary$contrast %<>% newline_vs_lables()
+
+  p <- plot_ly(deSummary, x = ~contrast, y = ~amount, type = "bar", fillcolor = ~direction) %>%
+    #  add_trace(y = ~upregulated, name = 'Upregulated') %>%
+    layout(
+      title = "Differential expression summary",
+      xaxis = list(title = "Contrast", tickangle = -contrastAngle),
+      yaxis = list(title = "Number of DE miRNAs"),
+      barmode = "stack",
+      colorway = cbp1,
+      margin = contrastMargin
+    ) # calculate margins for the x axis legend as this is not done by plot_ly
+
+  # this is needed in order to get the plot height right. without it, it was always set to 400px
+  subchunkify(p, 7, 9)
+} else {
+  cat("   \n\nNo contrast showed significantly differentially expressed miRNAs.   \n\n")
+}
+```
+
+# Appendix
+
+## R session information
+```{r session_info, include=TRUE, echo=TRUE, results='markup'}
+devtools::session_info()
+```
+
+## References
+
+The following references are provided for tools used with implications on the scientific and statistical outcome of this analysis. A multitude of other tools helped in preparation of this report of which many are available as open source. Please contact us for a full list of references.

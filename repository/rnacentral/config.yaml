@@ -1,0 +1,39 @@
+---
+# define distribution of threads on single rules running in snakemake.
+# e.g. 12, 8, 3 works out well on a 48 core machine.
+# for a 12 core cpu, 6,4,2 could be a good starting point.
+threads:
+  high: 6
+  medium: 4
+  low: 2
+# update version in 2 variables and URL to switch to the most recent release of RNAcentral
+id: rnacentral19.0
+version: '19.0'
+urls:
+  fasta: https://ftp.ebi.ac.uk/pub/databases/RNAcentral/releases/19.0/sequences/rnacentral_species_specific_ids.fasta.gz
+
+# select species IDs of organisms that should be analysed. Any species included in RNAcentral is possible
+species:
+  - '9606' # Homo sapiens
+  - '10090' # Mus musculus
+#  - '10116' # Rattus norvegicus
+#  - '9823' # Sus scrofa
+#  - '9913' # Bos taurus
+#  - '7227' # Drosophila melanogaster
+#  - '6239' # Caenorhabditis elegans
+#  - '9796' # Equus caballus
+#  - '9615' # Canis lupus familiaris
+#  - '9685' # Felis catus
+#  - '9986' # Oryctolagus cuniculus
+#  - '10141' # Cavia porcellus
+#  - '10029' # Cricetulus griseus
+#  - '7955' # Danio rerio
+bowtieFiletypes:
+  - 1.ebwt
+  - 2.ebwt
+  - 3.ebwt
+  - 4.ebwt
+  - rev.1.ebwt
+  - rev.2.ebwt
+output: "/data"
+dir: "/rnacentral"

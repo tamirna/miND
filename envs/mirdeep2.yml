@@ -1,0 +1,7 @@
+name: mirdeep2
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - mirdeep2=2.0.1.2
