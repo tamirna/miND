@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: >-
+  miND (miRNA NGS Discovery pipeline): a small
+  RNA-seq analysis pipeline and report generator for
+  microRNA biomarker discovery studies
+message: >-
+  When using the miND pipeline or parts of it, please
+  cite as below.
+type: software
+authors:
+  - given-names: Andreas
+    name-particle: B.
+    family-names: Diendorfer
+    email: andreas.diendorfer@tamirna.com
+    affiliation: 'TAmiRNA GmbH, Vienna, Austria'
+    orcid: 'https://orcid.org/0000-0003-0331-9685'
+  - given-names: Kseniya
+    family-names: Khamina
+    email: kseniya.khamina@tamrina.com
+    affiliation: 'TAmiRNA GmbH, Vienna, Austria'
+  - given-names: Marianne
+    family-names: Pultar
+    email: marianne.pultar@tamirna.com
+    affiliation: 'TAmiRNA GmbH, Vienna, Austria'
+  - given-names: Matthias
+    family-names: Hackl
+    email: matthias.hackl@tamirna.com
+    affiliation: 'TAmiRNA GmbH, Vienna, Austria'
+    orcid: 'https://orcid.org/0000-0002-4136-7293'
+
