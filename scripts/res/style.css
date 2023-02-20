@@ -1,0 +1,28 @@
+body .main-container {
+  max-width: 1600px !important;
+}
+
+#header {
+  display: none;
+}
+
+.list-group-item.active, .list-group-item.active:hover, .list-group-item.active:focus, .nav-pills > li.active > a, .nav-pills > li.active > a:hover, .nav-pills > li.active > a:focus {
+  background-color: #E68A00;
+  border-color: #E68A00;
+}
+
+a, a:hover, a:focus {
+    color: #E68A00;
+}
+
+blockquote {
+    font-size: inherit !important;
+}
+
+.row-fluid > .toc-content {
+  margin-top: 25px;
+}
+
+.dataTables_wrapper .dataTables_filter input {
+    border: 1px solid  #aaa;
+}

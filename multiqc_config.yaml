@@ -1,0 +1,22 @@
+top_modules:
+    - fastqc:
+        name: 'FastQC (processed reads)'
+        info: 'FastQC results of processed (adapter trimmed, filtered) reads.'
+        path_filters:
+            - '*fastqc_trimmed/*'
+    - cutadapt
+    - fastqc:
+        name: 'FastQC (raw)'
+        info: "FastQC results of unprocessed (raw) reads."
+        path_filters:
+            - '*fastqc_raw/*'
+
+table_columns_visible:
+    FastQC (raw):
+        percent_duplicates: True
+        percent_gc: False
+        avg_sequence_length: True
+    FastQC (processed reads):
+        percent_duplicates: True
+        percent_gc: False
+        avg_sequence_length: True

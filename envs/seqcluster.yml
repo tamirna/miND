@@ -1,0 +1,6 @@
+name: seqcluster
+channels:
+  - bioconda
+  - defaults
+dependencies:
+  - seqcluster=1.2.7

@@ -1,0 +1,122 @@
+import json
+from snakemake.remote.FTP import RemoteProvider as FTPRemoteProvider
+
+FTP = FTPRemoteProvider()
+configfile: "config.yaml"
+
+dataDir = os.path.dirname(workflow.basedir)
+outdir = dataDir + config["output"] + config["dir"] + '/' + config["version"]
+
+if(isinstance(config["species"], str)):
+    config["species"] = config["species"].split(",")
+
+rule all:
+    input:
+        expand( # bowtie-build will request the .dna. files but for other uses we also want
+                # the .rna. species filtered files
+            "{output}/{type}/uncompressed/{type}-{species}.rna.fa",
+            output = outdir,
+            type = config["types"],
+            species = config["species"]
+            ),
+        expand( # files for the species filtered miRBase database
+            "{output}/{type}/bowtiedb/{type}-{species}.{filetype}",
+            output = outdir,
+            filetype = config["bowtieFiletypes"],
+            type = config["types"],
+            species = config["species"]
+            ),
+        expand( # files for the whole miRBase database
+            "{output}/{type}/bowtiedb/{type}{variants}.{filetype}",
+            output = outdir,
+            filetype = config["bowtieFiletypes"],
+            type = config["types"],
+            variants = ["", "_subset", "_subset_unique"]
+            )
+
+rule buildBowtieIndex:
+    input:
+        "%s/{type}/uncompressed/{db}.dna.fa" % (outdir)
+    output:
+        expand(
+            "%s/{{type}}/bowtiedb/{{db}}.{filetype}" % (outdir),
+            filetype = config["bowtieFiletypes"]
+            )
+    conda:
+        "../envs/bowtie.yml"
+    log: "%s/.logs/buildBowtieIndex_{type}_{db}.log" % (outdir)
+    params:
+        ebwt_base = "%s/{type}/bowtiedb/{db}" % (outdir)
+    threads: config['threads']['medium']
+    shell: '''
+        bowtie-build --threads {threads} -f {input} {params.ebwt_base} > {log} 2>&1
+    '''
+# remove redundant sequences from the subset combined files (including sequence identical miRNAs from different species)
+rule deduplicateCombinedFiles:
+    input: "%s/{type}/uncompressed/{type}_subset.dna.fa" % (outdir)
+    output: temp("%s/{type}/uncompressed/{type}_subset_unique.dna.fa" % (outdir))
+    conda:
+        "../envs/biopython.yml"
+    threads: 1
+    shell: "python ./unique.py -i {input} -o {output}"
+
+rule combineExtractedSpeciesSequences:
+    input:
+        expand(
+            "%s/{{type}}/uncompressed/{{type}}-{species}.dna.fa" % (outdir),
+            species = config["species"]
+        )
+    output: temp("%s/{type}/uncompressed/{type}_subset.dna.fa" % (outdir))
+    threads: 1
+    shell: "cat {input} > {output}"
+
+rule extractSpeciesSequences:
+    input: "%s/{type}/uncompressed/{type}.{rdna}.fa" % (outdir)
+    output: "%s/{type}/uncompressed/{type}-{species}.{rdna}.fa" % (outdir)
+    threads: 1
+    shell: "grep -A 1 --no-group-separator '^>{wildcards.species}' {input} > {output}"
+
+rule convertRNAtoDNA:
+    input: "%s/{type}/uncompressed/{type}.rna.fa" % (outdir)
+    output: "%s/{type}/uncompressed/{type}.dna.fa" % (outdir)
+    conda:
+        "../envs/gawk.yml"
+    # shell command awk: replace {} with {{}} and escape \ with \\
+    threads: 1
+    shell: """
+        awk 'BEGIN{{RS=">";FS="\\n"}}NR>1{{printf ">%s\\n",$1;for (i=2;i<=NF;i++) {{gsub(/U/,"T",$i); printf "%s\\n",$i}}}}' {input} | seqtk seq -l0 - > {output}
+        """
+rule uncompressFiles:
+    input: "%s/{type}/{type}.fa.gz" % (outdir)
+    output: temp("%s/{type}/uncompressed/{type}.rna.fa" % (outdir))
+    conda:
+        "../envs/pigz.yml"
+    threads: config['threads']['medium']
+    shell: '''
+	pigz -p{threads} -dc {input} > {output}
+    '''
+
+rule moveFiles:
+    input: "%s/{file}.fa.gz" % (outdir)
+    output: temp("%s/{file}/{file}.fa.gz" % (outdir))
+    threads: 1
+    shell: "mv {input} {output}"
+
+remoteFiles = expand("%s/{type}.fa.gz" % (outdir), type=config["types"])
+rule downloadRemoteFiles:
+    output: temp(remoteFiles)
+    threads: 1
+    run:
+        for i in range(len(remoteFiles)):
+            fileNamePath = os.path.split(str(remoteFiles[i]))
+            filePath = fileNamePath[0]
+            fileName = fileNamePath[1]
+            cmd = "aria2c -x10 -s10 '%s/%s/%s' -o '%s' -d '%s'" % (config["baseUrl"], config["version"], fileName, fileName, filePath)
+            os.system(cmd)
+
+#rule downloadFiles:
+#    input: FTP.remote(expand("%s/%s/{type}.fa.gz" % (config["baseUrl"], config["version"]), type=config["types"]))
+#    output: temp(expand("%s/{type}.fa.gz" % (outdir), type=config["types"]))
+#    threads: 1
+#    run:
+#        shell("mv {input} %s/" % (outdir))

@@ -1,0 +1,76 @@
+import os
+import json
+
+configfile: "config.yaml"
+
+dataDir = os.path.dirname(workflow.basedir)
+outdir = dataDir + config["output"]
+
+outputFolders = []
+for id, genome in config["genomeSources"].items():
+    outputFolders.append(genome['name'] + '/' + genome['version'])
+
+rule all:
+    input:
+        expand( # files for the species filtered miRBase database
+            "%s/{outputFolder}/bowtiedb/genome.{filetype}" % (outdir),
+            outputFolder = outputFolders,
+            filetype = config["bowtieFiletypes"]
+            ),
+        expand( # files for the species filtered miRBase database
+            "%s/{outputFolder}/bowtiedb/cdna.{filetype}" % (outdir),
+            outputFolder = outputFolders,
+            filetype = config["bowtieFiletypes"]
+            )
+
+rule buildBowtieIndex:
+    input:
+        "%s/{genome}/{version}/uncompressed/{nucdb}.fa" % (outdir)
+    output:
+        expand(
+            "%s/{{genome}}/{{version}}/bowtiedb/{{nucdb}}.{filetype}" % (outdir),
+            filetype = config["bowtieFiletypes"]
+            )
+    log: "%s/.logs/buildBowtieIndex_{genome}_{version}_{nucdb}.log" % (outdir)
+    conda:
+        "../envs/bowtie.yml"
+    params:
+        ebwt_base = "%s/{genome}/{version}/bowtiedb/{nucdb}" % (outdir)
+    threads: config['threads']['high']
+    shell: '''
+        bowtie-build --threads {threads} -f {input} {params.ebwt_base} > {log} 2>&1
+    '''
+
+rule extractRemoteFiles:
+    input: "%s/{genome}/{version}/{files}.{ext}.gz" % (outdir)
+    output: temp("%s/{genome}/{version}/uncompressed/{files}.{ext}" % (outdir))
+    log: "%s/.logs/extractRemoteFiles_{genome}_{version}_{files}.{ext}.log" % (outdir)
+    conda:
+        "../envs/pigz.yml"
+    threads: config['threads']['medium']
+    shell: '''
+        pigz -p{threads} -dc {input} > {output} 2> {log}
+    '''
+
+rule downloadRemoteFiles:
+    output: temp("%s/{genome}/{version}/{file}.gz" % (outdir))
+    threads: 1
+    resources:
+        network=100
+    run:
+        fileNamePath = os.path.split(str(output))
+        filePath = fileNamePath[0]
+        fileName = fileNamePath[1]
+        os.system("aria2c -x10 -s10 '%s' -o '%s.download' -d '%s'" % (
+            config['genomeSources'][wildcards.genome]['urls'][os.path.splitext(wildcards.file)[0]],
+            fileName,
+            filePath
+            )
+        )
+        os.system("mv '%s/%s.download' '%s/%s'" % (
+            filePath,
+            fileName,
+            filePath,
+            fileName
+            )
+        )

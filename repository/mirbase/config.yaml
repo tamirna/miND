@@ -1,0 +1,38 @@
+---
+# define distribution of threads on single rules running in snakemake.
+# e.g. 12, 8, 3 works out well on a 48 core machine.
+# for a 12 core cpu, 6,4,2 could be a good starting point.
+threads:
+  high: 6
+  medium: 4
+  low: 2
+baseUrl: "https://www.mirbase.org/ftp"
+version: '22.1'
+# select the three letter codes of species that you want to include in the analysis. Any species included in miRBase is supported
+species:
+  - hsa
+  - mmu
+#  - rno
+#  - ssc
+#  - bta
+#  - dme
+#  - cel
+#  - eca
+#  - cfa
+#  - ocu
+#  - cpo
+#  - cgr
+#  - dre
+bowtieFiletypes:
+  - 1.ebwt
+  - 2.ebwt
+  - 3.ebwt
+  - 4.ebwt
+  - rev.1.ebwt
+  - rev.2.ebwt
+types:
+  - mature
+  - hairpin
+output: "/data"
+dir: "/mirbase"
+id: mirbase22.1

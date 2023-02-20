@@ -1,0 +1,96 @@
+import os
+import json
+
+configfile: "config.yaml"
+
+dataDir = os.path.dirname(workflow.basedir)
+outdir = dataDir + config["output"] + config["dir"] + '/' + config['version']
+
+remoteFilesUrl = [config["urls"]["fasta"]]
+remoteFiles = ['rnacentral_species_specific_ids.fa.gz']
+
+if(isinstance(config["species"], str)):
+    config["species"] = config["species"].split(",")
+
+rule all:
+    input:
+        expand(
+            "%s/bowtiedb/rnacentral_species_specific_ids-{species}.{filetype}" % (outdir),
+            species = config["species"],
+            filetype = config["bowtieFiletypes"]
+            )
+
+rule buildBowtieIndex:
+    input:
+        "%s/uncompressed/{db}.fa" % (outdir)
+    output:
+        expand(
+            "%s/bowtiedb/{{db}}.{filetype}" % (outdir),
+            filetype = config["bowtieFiletypes"]
+            )
+    conda:
+        "../envs/bowtie.yml"
+    log: "%s/.logs/buildBowtieIndex__{db}.log" % (outdir)
+    params:
+        ebwt_base = "%s/bowtiedb/{db}" % (outdir)
+    threads: config['threads']['medium']
+    shell: '''
+        bowtie-build --threads {threads} -f {input} {params.ebwt_base} > {log} 2>&1
+    '''
+
+# remove redundant sequences from the subset combined files (including sequence identical miRNAs from different species)
+rule deduplicateCombinedFiles:
+    input: "%s/uncompressed/{type}_subset.fa" % (outdir)
+    output: temp("%s/uncompressed/{type}_subset_unique.fa" % (outdir))
+    conda:
+        "../envs/biopython.yml"
+    threads: 4
+    shell: "python unique.py -i {input} -o {output}"
+
+rule combineExtractedSpeciesSequences:
+    input:
+        expand(
+            "%s/uncompressed/{species}.fa" % (outdir),
+            species = config["species"]
+        )
+    output: temp("%s/uncompressed/subset.fa" % (outdir))
+    threads: 4
+    shell: "cat {input} > {output}"
+
+rule extractSpeciesSequences:
+    input: "%s/reformatted/{file}.fa" % (outdir)
+    output: temp("%s/uncompressed/{file}-{species}.fa" % (outdir))
+    threads: 4
+    shell: "grep -A 1 --no-group-separator '^>URS[0-9A-Z]*_{wildcards.species}\s' {input} > {output}"
+
+rule reformatFasta:
+    input: "%s/uncompressed/{files}.fa" % (outdir)
+    output: temp("%s/reformatted/{files}.fa" % (outdir))
+    log: "%s/.logs/reformatFasta_{files}.log" % (outdir)
+    threads: 4
+    shell: '''
+        awk '/^>/ {{printf("\\n%s\\n",$0);next; }} {{ printf("%s",$0);}}  END {{printf("\\n");}}' < {input} > {output}
+    '''
+
+rule extractRemoteFiles:
+    input: "%s/{files}.gz" % (outdir)
+    output: temp("%s/uncompressed/{files,[a-z_]*.fa}" % (outdir))
+    log: "%s/.logs/extractRemoteFiles_{files}.log" % (outdir)
+    threads: 16
+    conda:
+        "../envs/pigz.yml"
+    shell: '''
+	   pigz -p{threads} -dc {input} > {output} 2> {log}
+    '''
+
+remoteFiles = expand("{dir}/{files}", dir=outdir, files=remoteFiles)
+rule downloadRemoteFiles:
+    output: temp(remoteFiles)
+    threads: 1
+    run:
+        for i in range(len(remoteFiles)):
+            fileNamePath = os.path.split(str(remoteFiles[i]))
+            filePath = fileNamePath[0]
+            fileName = fileNamePath[1]
+            cmd = "aria2c -x10 -s10 '%s' -o '%s' -d '%s'" % (remoteFilesUrl[i], fileName, filePath)
+            os.system(cmd)
