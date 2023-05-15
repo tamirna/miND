@@ -41,7 +41,7 @@ if hash snakemake 2>/dev/null; then
 else
   echo "snakemake command NOT found"
   conda install -y mamba -c conda-forge
-  mamba install -y -c bioconda -c conda-forge snakemake=6.*
+  mamba install -y -c bioconda -c conda-forge snakemake=7.*
   mamba install -y -c conda-forge pip xorg-libxrender xorg-libxpm python=3.9.* pandas=1.1.* xlrd=1.*
 fi
 
