@@ -34,18 +34,39 @@ if(!exists("snakemake")) {
   mirnaMappingStatsVar <- paste(debugOutputPath, "analysis_sampleMappingStats/all_samples.csv", sep="/")
   mirnaMappingStatsRPMVar <- paste(debugOutputPath, "analysis_sampleMappingStats/all_samples_rpm_miRNA.csv", sep="/")
   deDirVar <- paste(debugOutputPath, "analysis_differentialExpression/", sep="/")
-  spikeInAnalysis <- FALSE
+  spikeInAnalysis <- TRUE
+  spikeInVersion <- "Vers3"
+  spikeInLot <- "undefined"
   alpha <- 0.05
 
   source("../scripts/common.R")
 } else {
+  source("scripts/common.R")
   sampleSheetFileVar <- snakemake@input["sampleSheetFile"]
   sampleMappingQuantificationsVar <- snakemake@input["sampleMappingQuantifications"]
   csvGenomeMappingVar <- snakemake@input["csvGenomeMapping"]
   mirnaMappingStatsVar <- snakemake@input["mirnaMappingStats"]
   mirnaMappingStatsRPMVar <- snakemake@input["mirnaMappingStatsRPM"]
   deDirVar <- snakemake@input["deDir"]
-  spikeInAnalysis = FALSE
+  if(snakemake@config['includeSpikeIns'] == 1) {
+    spikeInVersion <- snakemake@config['spikeInVersion']
+    spikeInVersion <- as.character(spikeInVersion)
+    if (spikeInVersion %in% names(spikeInLots)){
+      spikeInAnalysis <- TRUE
+    } else if (spikeInVersion == "No"){
+      spikeInAnalysis <- FALSE
+      messageSpike <- paste("miND® spike-in not added")
+    } else {
+      spikeInAnalysis <- TRUE
+      messageSpike <- paste("No information or concentrations found for miND® spike-in version:", spikeInVersion)
+    }
+    if(snakemake@config['spikeInLot'] != "") {
+      spikeInLot <- snakemake@config['spikeInLot']
+    }
+  } else {
+    spikeInAnalysis <- FALSE
+    messageSpike <- paste("miND® spike-in not added")
+  }
   alpha <- as.numeric(snakemake@config['alpha'])
   
   source("scripts/common.R")
@@ -63,15 +84,16 @@ library("readr")
 library("readxl")
 library("ggrepel")
 library("edgeR")
-library("kableExtra")
-library("DT")
-library("plotly")
-library("genefilter")
-library("pheatmap")
-library("RColorBrewer")
-library("pcaMethods")
-library("WriteXLS")
-library("Rtsne")
+
+library(kableExtra)
+library(DT)
+library(plotly)
+library(genefilter)
+library(pheatmap)
+library(RColorBrewer)
+library(pcaMethods)
+library(WriteXLS)
+library(Rtsne)
 
 if (deDirVar != "NULL") {
   showDE <- TRUE
@@ -102,6 +124,7 @@ Analysis parameters:
 * Minimum read length: `r if(exists("snakemake")) snakemake@config['readMinLength']`nt
 * Reads quality cutoff: `r if(exists("snakemake")) snakemake@config['qualityCutoff']` (phred quality score)
 * Significance level: `r alpha`
+`r ifelse(spikeInAnalysis, paste0("* miND® spike-in version: ", spikeInVersion, if(exists("spikeInLot")) paste0(" (Lot: ",spikeInLot,") "), if(exists("messageSpike")) messageSpike), paste0("*", messageSpike))`
 
 Tabular data can be filtered or sorted using the fields and options at the top of each table. To export the data for further processing, please select the desired format (Excel or CSV) at the table.
 
@@ -471,6 +494,406 @@ data %>%
   theme_light()
 ```
 
+
+
+```{r spikeInCalibration, results='asis', eval = spikeInAnalysis}
+cat("  \n\n## miND® spike-in analysis \n\n  ")
+cat("  \n\n miND® spike-ins [@Khamina2022] were used to calculate absolute concentrations of miRNAs detected in the NGS data. In order to calculate concentrations of miRNAs, a linear regression model (y ~ 0 + x) is used. [Prediction intervalls](https://en.wikipedia.org/wiki/Prediction_interval) are provided in addition to the estimated concentrations in the downloadable data below. Please make sure to check that the selected model is an appropriate choice for the given data and consider prediction intervals when interpreting the results. \n\n")
+
+miRNAs2 <- paste0(as.character(mirnaMappingStatsVar)) %>%
+  read_delim(delim = "\t") %>%
+  column_to_rownames("ID")
+miRNAs2 <- miRNAs2[rowSums(miRNAs2) > 0, ] # remove rows with zero reads in all samples
+# this is needed to make sure that we don't mix up samples here
+samples <- as_tibble(list(sampleID = as.character(colnames(miRNAs2)))) %>% left_join(sampleSheetSamples, "sampleID")
+groups <- colnames(sampleSheetSamples %>% select(-sampleID, -Filename))
+
+## calculate standard curve for each sample
+amol <- 602214 # number of molecules in 1 amol
+finalVolume <- 9.5 # final volume of sample + spikeInsVolume uL of the spikeins with the below concentrations
+spikeInsVolume <- 1
+
+spikeinConcentrations <- spikeInLots[[spikeInVersion]]
+spikeinConcentrations <- spikeinConcentrations[order(names(spikeinConcentrations))]
+
+spikeinFinalConcentrations <- spikeinConcentrations * spikeInsVolume * amol / finalVolume #  final concentrations of the spikeins in 1uL of the sample (molecules/uL)
+
+spikeins <- miRNAs2 %>%
+  rownames_to_column("ID") %>% # convert rownames to a column
+  filter(grepl("^#", ID)) %>% # get only spikeins
+  filter(!grepl("^#uni", ID)) %>%
+  arrange(ID) %>% # but remove the uniSp from qiagen
+  column_to_rownames("ID") %>%
+  t() %>%
+  as_tibble() %>%
+  add_column("sampleID" = samples$sampleID) %>%
+  column_to_rownames("sampleID")
+
+# remove the hashtag from the spikein names
+colnames(spikeins) <- gsub('#', '', colnames(spikeins))
+
+# check if all spikeins are present and fill with 0 it not
+for(i in 1:length(spikeinFinalConcentrations)) {
+  if(!(names(spikeinFinalConcentrations[i]) %in% colnames(spikeins))) {
+    spikeins[,names(spikeinFinalConcentrations[i])] <- 0
+  }
+}
+
+# order columns alphabetically
+spikeins <- spikeins[,order(colnames(spikeins))]
+
+# spikein statistics for each sample
+spikeInStats <- tibble(
+  ID = character(),
+  spikeInsDetected = numeric(),
+  miRNAsInRange = numeric(),
+  intercept = numeric(),
+  slope = numeric(),
+  rsq = numeric(),
+  qc = character()
+)
+
+miRNAPredConc <- miRNAs2 %>% rownames_to_column("ID") %>% filter(!grepl("^#", ID)) %>% select("ID")
+colnames(miRNAPredConc) <- c("ID")
+
+miRNAPredPI <- miRNAPredConc
+miRNAPredConcPI <- miRNAPredConc
+
+myplotsOne <- vector('list', nrow(spikeins))
+myplotsTwo <- vector('list', nrow(spikeins))
+myplotsThree <- vector('list', nrow(spikeins))
+
+for(i in 1:nrow(spikeins)) { # iterate over each row = sample
+  sampleSpikeins <- spikeins[i,]
+  sampleReads <- miRNAs2 %>%
+    rownames_to_column("ID") %>%
+    filter(!grepl("^#", ID)) %>% # remove spikeins from this set
+    select(ID, reads=rownames(spikeins[i,])) %>%
+    filter(reads > 0)
+
+  # some quality control to see if we even have enough spikeins
+  spikeInsDetected <- sum(sampleSpikeins > 0)
+  spikeInsExpected <- length(spikeinConcentrations)
+
+  # if more than 2 spike ins are not detected, QC is failed and spike ins cant be used to calculate
+  # otherwise this will be only a warning
+  qc.spikeInsMissing <- spikeInsExpected - spikeInsDetected
+
+  if(qc.spikeInsMissing > 2) {
+    spikeInStats %<>% add_row(
+      ID = rownames(sampleSpikeins),
+      spikeInsDetected = spikeInsDetected,
+      miRNAsInRange = 0,
+      intercept = NA,
+      slope = NA,
+      rsq = NA,
+      qc = "failed"
+    )
+
+    # add the calculated values to the miRNAConcentrations tibble that will hold all samples
+    miRNAPredConc %<>% add_column(!!rownames(sampleSpikeins) := NA)
+    miRNAPredPI %<>% add_column(!!rownames(sampleSpikeins) := NA)
+    miRNAPredConcPI %<>% add_column(!!rownames(sampleSpikeins) := NA)
+
+  } else {
+    df <- cbind(as.vector(sampleSpikeins) %>% unlist, as.vector(spikeinFinalConcentrations) %>% unlist) %>%
+      as_tibble()
+
+    colnames(df) <- c("x", "y")
+    df %<>%
+      filter(x > 0)
+
+    # https://darrendahly.github.io/post/loglog/
+    fm <- lm(y ~ 0 + x, data = df)
+    summary(fm)
+
+    intercept <- 0 # as.matrix(coef(fm))[1]
+    slope <- as.matrix(coef(fm))[1]
+    rsq <- summary(fm)$r.squared #with(summary(fm), 1 - deviance/null.deviance) # https://stats.stackexchange.com/questions/46345/how-to-calculate-goodness-of-fit-in-glm-r/46358 # summary(fm)$r.squared
+
+    pred.int <- predict(fm, interval = "prediction")
+
+    df <- cbind(df, pred.int)
+
+    pred.int %<>% as_tibble %>%
+      add_column(x=df$x)
+    # we can only predict values of miRNAs that are in rang of
+    # our spikeins. for all others, we can't make a prediction.
+
+    # spike ins range
+    siUL <- max(df$x)
+    siLL <- min(df$x)
+
+    sampleReads$cat <- "in range"
+    if(nrow(sampleReads[sampleReads$reads < siLL,]) > 0) sampleReads[sampleReads$reads < siLL,]$cat <- "below LL"
+    if(nrow(sampleReads[sampleReads$reads > siUL,]) > 0) sampleReads[sampleReads$reads > siUL,]$cat <- "above UL"
+
+    # sampleReads$cat <- as.factor(sampleReads$cat, levels = c("in range", "below LL", "above UL"))
+    cbPallete <- c("in range" = "blue", "below LL" = "red", "above UL" = "red")
+
+    sampleSpikeIns <- miRNAs2 %>%
+      rownames_to_column("ID") %>%
+      filter(grepl("^#", ID)) %>% # add only spikeins from this set
+      filter(!grepl("^#uni", ID)) %>% # remove uniSp spikeins
+      select(ID, reads=rownames(spikeins[i,])) %>%
+      add_column(cat = "spikein")
+
+    sampleReadsStats <- sampleReads %>%
+      group_by(cat) %>%
+      dplyr::summarize(n = dplyr::n()) %>%
+      mutate(perc = n/sum(n))
+
+    miRNAsRatioInSpikeInRange <- sampleReadsStats %>% filter(cat=="in range") %>% select("perc") %>% as.numeric()
+
+    qcResult <- "passed"
+    if(qc.spikeInsMissing > 0) {
+      qcResult <- "passed"
+    } else if(is.na(slope)) {
+      qcResult <- "failed"
+    } else if(miRNAsRatioInSpikeInRange < 0.5) {
+      qcResult <- "passed"
+    } else if(rsq < 0.95) {
+      qcResult <- "warning"
+    } else {
+      qcResult <- "passed"
+    }
+
+    spikeInStats %<>% add_row(
+      ID = rownames(sampleSpikeins),
+      spikeInsDetected = spikeInsDetected,
+      miRNAsInRange = miRNAsRatioInSpikeInRange,
+      intercept = intercept,
+      slope = slope,
+      rsq = rsq,
+      qc = qcResult
+    )
+
+    miRNAsInRange <- sampleReads %>%
+    #  filter(reads >= siLL & reads <= siUL) %>%
+      select(-cat)
+
+
+    # predict values (conc) for all in range miRNAs plus their prediction interval (p) not (!) confidence interval (c)
+    predicted <- predict(fm, data.frame(x = miRNAsInRange$reads), interval="p") %>%
+      as_tibble() %>%
+      mutate(interval = round(fit-lwr, 2)) %>%
+      mutate(concentration = round(fit, 2)) %>%
+      select(concentration, interval)
+    miRNAsInRange %<>%
+      cbind(predicted)
+
+    # add the calculated values to the miRNAConcentrations tibble that will hold all samples
+    miRNAPredConc %<>% left_join(miRNAsInRange %>%
+      select(ID, !!rownames(sampleSpikeins) := concentration), by="ID")
+
+    miRNAPredPI %<>% left_join(miRNAsInRange %>%
+      select(ID, !!rownames(sampleSpikeins) := interval), by="ID")
+
+    miRNAPredConcPI %<>% left_join(
+      miRNAsInRange %>%
+        mutate(!!rownames(sampleSpikeins) := paste0(concentration %>% round(0) %>% format(big.mark=" "), " ±", interval %>% round(0) %>% format(big.mark=" "))) %>%
+        select(ID, !!rownames(sampleSpikeins))
+      , by="ID")
+
+
+    myplotsOne[[i]] <- local({
+      p1 <- ggplot(df, aes(x, y)) +
+        # geom_smooth(method = "lm", se=TRUE, formula = y ~ x) +
+   #     geom_line(aes(y = lwr, x = x), color = "red", linetype = "dashed") +
+   #     geom_line(aes(y = upr, x = x), color = "red", linetype = "dashed") +
+        geom_point() +
+        geom_line(aes(x=x, y=fit), color='blue', linetype="dashed", size=0.2) +
+        scale_x_log10(breaks = c(1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7)) +
+        scale_y_log10(breaks = c(1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7)) +
+        annotation_logticks( size=0.1) +
+        labs(title = "Spike-in calibrator fit",
+             subtitle = paste0("R-squared = ", round(rsq, 4)),
+             x = "Raw reads",
+             y = "Copies [molecules/uL]")
+    })
+
+    myplotsTwo[[i]] <- local({
+      p2 <- ggplot(sampleReads %>% bind_rows(sampleSpikeIns), aes(y=reads, x=paste0(rownames(spikeins[i,])), color=cat)) +
+        annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = siLL, alpha = .1, fill = "black") +
+    #    annotate("rect", xmin = -Inf, xmax = Inf, ymin = siLL, ymax = siUL, alpha = .1, fill = "green") +
+        annotate("rect", xmin = -Inf, xmax = Inf, ymin = siUL, ymax = Inf, alpha = .1, fill = "black") +
+        geom_point(data=function(x) { filter(x, cat != "spikein") }, aes(x=paste0(rownames(spikeins[i,])), y=reads), alpha=0.5, position = position_jitter(width = .3)) +
+        geom_hline(data=function(x) { filter(x, cat == "spikein") }, aes(yintercept=reads), alpha=0.5) +
+        geom_text(data=function(x) { filter(x, cat == "spikein") }, aes(y=reads, x=Inf, label=paste0(reads, " (", ID,")")), alpha=0.9, color="black", vjust = 0, hjust=1,  size=3) +
+        scale_y_log10() +
+        scale_color_manual(values = cbPallete) +
+        expand_limits(y=0.01) +
+        labs(title = "Reads distribution",
+         subtitle = paste0(miRNAsRatioInSpikeInRange %>% round(4) %>% "*"(100), "% miRNAs in range"),
+         x = "",
+         y = "Raw reads",
+         color = "") +
+        theme(legend.position="bottom",
+              legend.text = element_text(size = 6),
+              legend.title = element_text(size = 7))
+    })
+
+
+    myplotsThree[[i]] <- local({
+      p3 <- autoplot(fm, which = 1:3, ncol = 3, label.size = 1)
+    })
+  }
+}
+
+miRNAPredConc %<>%
+    mutate_all(~replace(., is.na(.), 0)) %>%
+  column_to_rownames("ID")
+miRNAPredPI %<>%
+    mutate_all(~replace(., is.na(.), 0)) %>%
+  column_to_rownames("ID")
+miRNAPredConcPI %<>%
+    mutate_all(~replace(., is.na(.), 0)) %>%
+  column_to_rownames("ID")
+
+cat("  \n\n### Predicted miRNA concentrations [molecules/uL] and prediction intervalls\n\n  ")
+cat("  \n\nThis table contains all identified miRNAs in each sample. miRNA reads are converted to absolute molecules/uL based on NGS spike-in calibrators.
+
+Please use the download link provided underneath the table to save the miRNA mappings data. The buttons provided at the top of the table can also be used, but won't include detailed group information of the samples.\n\n  ")
+
+tbl <- miRNAPredConc %>%
+  rownames_to_column("ID") %>%
+  mutate_at(vars(-ID), round) %>%
+  column_to_rownames("ID") %>%
+  datatable(
+  extensions = "Buttons",
+  rownames = TRUE,
+  options = list(
+    dom = "Bfrtlip",
+    buttons = list("copy", list(extend = "csv", filename = "miRNAsConcentrationTable"), list(extend = "excel", filename = "miRNAsConcentrationTable")),
+    scrollX = TRUE,
+    columnDefs = list(list(width = "100px", targets = c(0)))
+  ),
+  container = htmltools::withTags(table(
+    class = "display",
+    thead(
+      lapply(groups, function(group) {
+        tr(
+          th(group),
+          lapply(c(samples[, group])[[1]], th)
+        )
+      }),
+      tr(
+        th("sampleID"),
+        lapply(samples$sampleID, th)
+      )
+    )
+  ))
+)
+
+print(htmltools::tagList(tbl))
+
+print(htmltools::p(style="display: block; clear: both"))
+
+# this whole block is neede to generate a XLS file of the mapped miRNAs with the group information embedded. datatable can not include complex headers in the xls/csv export, so we have to do it on our own
+sampleGroups <- t(samples %>% select(-sampleID, -Filename)) %>% as_tibble(rownames = NA)
+colnames(sampleGroups) <- samples$sampleID
+
+xls <- bind_rows(sampleGroups, as_tibble(miRNAPredConcPI %>% mutate_all(as.character))) %>%
+  add_column("rownames" = c(groups, rownames(miRNAPredConcPI))) %>%
+  column_to_rownames("rownames")
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(xls,
+  ExcelFileName = xlsFilename, SheetNames = c("absolutConc"),
+  col.names = TRUE, row.names = TRUE
+)
+
+txt <- xfun::embed_file(xlsFilename, name = "miRNAsConcentrationPITable.xlsx", text = "Download miRNA absolute quantification table (concentration and prediction intervall)")
+
+print(htmltools::tagList(txt))
+cat("  \n\n\n\n  ")
+
+xls <- bind_rows(sampleGroups, as_tibble(miRNAPredConc %>% mutate_all(as.character))) %>%
+  add_column("rownames" = c(groups, rownames(miRNAPredConc))) %>%
+  column_to_rownames("rownames")
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(xls,
+  ExcelFileName = xlsFilename, SheetNames = c("absolutConc"),
+  col.names = TRUE, row.names = TRUE
+)
+txt <- xfun::embed_file(xlsFilename, name = "miRNAsConcentrationTable.xlsx", text = "Download miRNA absolute quantification table (concentration)")
+
+#cat(paste0("  \n\n", txt, "\n\n  "))
+print(htmltools::tagList(txt))
+cat("  \n\n\n\n  ")
+
+xls <- bind_rows(sampleGroups, as_tibble(miRNAPredPI %>% mutate_all(as.character))) %>%
+  add_column("rownames" = c(groups, rownames(miRNAPredPI))) %>%
+  column_to_rownames("rownames")
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(xls,
+  ExcelFileName = xlsFilename, SheetNames = c("absolutConc"),
+  col.names = TRUE, row.names = TRUE
+)
+txt <- xfun::embed_file(xlsFilename, name = "miRNAsConcentrationPITable.xlsx", text = "Download miRNA absolute quantification table (prediction intervals only)")
+
+#cat(paste0("  \n\n", txt, "\n\n  "))
+print(htmltools::tagList(txt))
+print(htmltools::p(style="display: block; clear: both"))
+
+cat("  \n\n### miND® spike-in quality control {.tabset .tabset-fade .tabset-pills} \n\n  ")
+cat("  \n\n The 'Calibration QC' column contains information about the quality control evaluation based on the miND® spike-ins [@Khamina2022]. For a sample to pass the calibration QC checks, the following must be true: \n\n
+* 5 or more miND® spike-in core sequences detected
+* linear model parameters calculated
+* Pearson correlation coefficient (r-squared) above 0.95
+\n\n
+
+\n\n")
+cat("  \n\n#### Overview \n\n  ")
+
+tbl <- spikeInStats %>%
+  mutate(miRNAsInRange = miRNAsInRange*100) %>%
+  select(sampleID = ID, "SpikeIns detected" = spikeInsDetected, "miRNAs in range [%]" = miRNAsInRange, "R-squared" = rsq, "Calibration QC" = qc) %>%
+  datatable(
+    extensions = "Buttons",
+    rownames = FALSE,
+    options = list(
+      dom = "Bfrtlip",
+      buttons = list("copy", list(extend = "csv", filename = "calibratorPerformanceTable"), list(extend = "excel", filename = "calibratorPerformanceTable")),
+      scrollX = TRUE
+    )
+  ) %>%
+    formatSignif(3:4, digits = 4, mark = "&nbsp;")
+
+print(htmltools::tagList(tbl))
+
+print(htmltools::p(style="display: block; clear: both"))
+
+# myplotsOne[sapply(myplotsOne, is.null)] <- NULL
+#if (is.null(myplotsOne[[]])||is.null(myplotsTwo[[]])||is.null(myplotsThree[[]])) {
+#	myplotsOne[sapply(myplotsOne, is.null)] <- NULL
+#	myplotsTwo[sapply(myplotsTwo, is.null)] <- NULL
+#	myplotsThree[sapply(myplotsThree, is.null)] <- NULL
+#	}
+
+
+if(!is.null(length(myplotsOne))) {
+  for(i in 1:length(myplotsOne)) { # iterate over each row = sample
+    if(!is.null(myplotsOne[[i]])) {
+
+      cat("  \n\n#### ", rownames(spikeins)[[i]],"  \n\n  ")
+
+      #p1 <- ggplotly(myplotsOne[[i]])
+      #p2 <- ggplotly(myplotsTwo[[i]])
+
+      #subchunkify(p1, 7, 9)
+      #subchunkify(p2, 7, 9)
+
+      grid.arrange(myplotsOne[[i]], myplotsTwo[[i]], layout_matrix = rbind(c(1,1,2)), nrow=1, top = paste0(rownames(spikeins)[[i]]))
+      # subchunkify(myplotsThree[[i]], 3, 9)
+    }
+  }
+}
+cat("  \n\n## {.unlisted .unnumbered}  \n\n  ")
+## {-}
+print(htmltools::p(style="display: block; clear: both"))
+```
+
+
 ## Heatmaps {.tabset .tabset-fade .tabset-pills}
 
 Data is based on RPM normalized reads and scaled using the unit variance method for visualization in heatmaps. Clustering is done using the average method of pheatmap calculating the distances as correlations.
@@ -486,7 +909,7 @@ reads <- paste0(as.character(filename)) %>%
   read_delim(delim = "\t") %>%
   filter(!grepl("^#", ID)) %>% # remove spike ins that all start with a # so that we don't have them in the PCA and other plots
   column_to_rownames("ID")
-reads <- reads[rowSums(reads[, -1]) > 0, ]
+reads <- reads[rowSums(reads) > 0, ]
 ids <- rownames(reads)
 
 # this block is used to get a list of miRNAs that have non zero values in at least 1/n(groups) of the samples
@@ -616,6 +1039,98 @@ xfun::embed_file(xlsFilename, name = "heatmapReadsAll.xlsx", text = "Download da
 ```
 
 
+
+```{r heatmapmiND, results='asis', eval = FALSE}
+cat("  \n\n### miND® spike-in concentrations \n\n")
+cat("  \n\nThe following heatmap is generated using the miND® spike-in absolute concentrations (log1p transformed).  \n\n")
+
+
+reads <- miRNAPredConc
+ids <- rownames(reads)
+
+# this block is used to get a list of miRNAs that have non zero values in at least 1/n(groups) of the samples
+# withouth this filter, the amount of very low read count miRNAs take up all the space in the heatmap
+percCutoff <- 1 / (nrow(unique(sampleSheetSamples[, 3]))*2)
+# percCutoff <- 1
+relevantGenes <- reads %>%
+  rownames_to_column("ID") %>%
+  gather(key = "sample", value = "reads", -ID) %>%
+  group_by(ID) %>%
+  summarize(
+    samples = n(),
+    samples_gt0 = sum(reads > 5),
+    psamples_gt0 = samples_gt0 / samples
+  ) %>%
+  filter(psamples_gt0 >= percCutoff)
+
+reads %<>% mutate(
+  Mean = rowMeans(.),
+  SD = rowSds(.)
+) %>%
+  mutate(coeffV = SD / Mean)
+rownames(reads) <- ids
+
+groups <- sampleSheetSamples[c(1, 3:ncol(sampleSheetSamples))] %>%
+  unite(sampleIDWG, sampleID, 2, sep = " @ ", remove = FALSE) %>%
+  column_to_rownames("sampleIDWG") %>%
+  select(-sampleID)
+
+
+readsAllRelevantMind <- reads[relevantGenes$ID, ]
+#readsAllRelevant <- reads
+readsAllRelevantMind %<>% select(-Mean, -SD, -coeffV)
+reads %<>% select(-Mean, -SD, -coeffV)
+
+t <- readsAllRelevantMind %>%
+  t() %>%
+  as_tibble(rownames = NA) %>%
+  rownames_to_column("sampleID")
+# t$customerID <- as.numeric(t$customerID)
+t %<>% left_join(sampleNamesWithGroup, by = "customerID") %>%
+  column_to_rownames("sampleIDWG") %>%
+  select(-sampleID)
+rowNames <- rownames(t(t))
+readsAllRelevantMind <- t %<>% t() %>%
+  as_tibble(rownames = NA) %>%
+  add_column(ID = rowNames) %>%
+  column_to_rownames("ID")
+
+
+scaledAllMind <- prep(t(log1p(readsAllRelevantMind)), scale = "none", center = TRUE)
+scaledAllMind <- t(scaledAllMind)
+
+annotationColors <- list()
+n <- lapply(colnames(groups), function(group) {
+  cols <- colorRampPalette(brewer.pal(length(unique(groups[, group])), "Set1"))
+
+  annotationColors[[group]] <<- cols(length(unique(groups[, group])))
+  names(annotationColors[[group]]) <<- unique(groups[, group])
+})
+
+pheatmap(scaledAllMind,
+  annotation_col = groups,
+  annotation_colors = annotationColors,
+  #        cutree_cols = 1,
+  color = colorRampPalette(rev(brewer.pal(n = 8, name = "RdBu")))(100),
+  clustering_distance_rows = "correlation",
+  clustering_distance_cols = "correlation",
+  clustering_method = "average",
+  show_rownames = FALSE,
+  border_color = NA,
+  angle_col = 90,
+  fontsize_col = 6
+)
+
+xlsFilename <- tempfile(fileext = ".xlsx")
+WriteXLS(readsAllRelevantMind,
+  ExcelFileName = xlsFilename, SheetNames = c("RPM reads"),
+  col.names = TRUE, row.names = TRUE
+)
+xfun::embed_file(xlsFilename, name = "heatmapConcentration.xlsx", text = "Download data used to generate the heatmap")
+
+```
+
+
 ## PCA {.tabset .tabset-fade .tabset-pills}
 
 Principal component analysis (PCA) uses RPM normalized miRNA reads and reduces the data dimensions down to two, so that it can be plotted in a graph. A quick introduction to PCA plots and the underlaying principle, can be found [here](http://setosa.io/ev/principal-component-analysis/).
@@ -667,6 +1182,7 @@ plot_ly(readsDf,
 ### PCA cluster by hierarchical clustering
 
 ``` {r pcaGroupCluster}
+# plot(readsHC)
 plot_ly(readsDf,
   x = ~PC1,
   y = ~PC2,
@@ -810,7 +1326,7 @@ for (i in 1:length(contrasts)) {
 
     cat(paste0("  \n\nPrefiltering set cutoff to ", round(prefilteringStats$rpmCutoff, 2), " RPM in at least ", prefilteringStats$minLibs, " samples. There were ", prefilteringStats$removeGenes, " low read count miRNAs removed, accounting\nfor ", round(prefilteringStats$removedRCPerc * 100, 4), "% (", prefilteringStats$removedRC, " reads absolute) of the total reads.\n\n "))
 
-    print(htmltools::tagList(xfun::embed_file(paste0(contrastPath, "/dePrefilteringRemovedGenes.csv"), name = "dePrefilteringRemovedMiRNAs.csv", text = "Download RPM table of prefiltering removed miRNAs")))
+    print(htmltools::tagList(xfun::embed_file(paste0(contrastPath, "/dePrefilteringRemovedGenes.xlsx"), name = "dePrefilteringRemovedMiRNAs.xlsx", text = "Download RPM table of prefiltering removed miRNAs")))
   }
 
   fdrData <- paste0(contrastPath, "/fdrAdjustmentThreshold.dat") %>%
@@ -859,7 +1375,7 @@ for (i in 1:length(contrasts)) {
   print(htmltools::tagList(tbl))
 
   cat("  \n\n### Volcano plot{.tabset .tabset-fade .tabset-pills}  \n\n")
-  cat("  \n\nThis graph visualizes the relation of the logFC (how much did a miRNA change in the groups) and the statistical significance of this change. miRNAs higher up have a smaller FDR value, while miRNAs more to the left or right of the center, show a greater differential expression.\n\n")
+  cat("  \n\nThis graph visualizes the relation of the logFC (how much did a miRNA change between groups) and the statistical significance of this change. Statistical significance is expressed as false discovery rate (FDR) according to Benjamini and Hochberg [@Benjamini1995]. miRNAs higher up have a smaller FDR value, while miRNAs more to the left or right of the center, show a greater differential expression.\n\n")
 
   cat("  \n\n#### FDR based  \n\n")
   data <- paste0(contrastPath, "/volcanoPlot.dat") %>%
@@ -933,7 +1449,7 @@ for (i in 1:length(contrasts)) {
   subchunkify(p, 7, 9)  
 
   cat("  \n\n### Top up- and down-regulated{.tabset .tabset-fade .tabset-pills}  \n\n")
-  cat("  \n\nTop up- and down-regulated miRNAs in the given contrast with their CPM values from edgeR. miRNAs are ordered by logFC (FDR < ", alpha, " only) starting with the greatest on the top left.\n\n
+  cat("  \n\nTop up- and down-regulated miRNAs in the given contrast with their CPM values. CPM normalized values are calculated by edgeR and offer a more robust normalization for the calculation of differential expression than RPM. miRNAs are ordered by logFC (FDR < ", alpha, " only) starting with the greatest on the top left.\n\n
   For miRNAs with no reads (CPM = 0) in a sample, the CPM was set to 1, so that they can be displayed in this logarithmic plot as a 0 on the y axis (as the log10 of 0 is undefined).
   \n\n")
 
