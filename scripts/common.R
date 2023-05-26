@@ -306,34 +306,8 @@ tsne <- function(mydata, labels=FALSE, perplex=15, printres=FALSE, seed=FALSE, a
   return(p)
 }
 
-#SpikeIn Lots
-
 spikeInLots <- list(
-  Vers2 = c( # concentrations in amol/uL equals the amol added to each finalVolume
-    "C" = 0.01,
-    "E" = 0.005,
-    "H" = 0.1,
-    "I" = 50,
-    "K" = 10,
-    "M" = 2.5,
-    "N" = 1.5),
-  Vers3.April2021 = c( # concentrations in amol/uL equals the amol added to each finalVolume
-    "C" = 0.01,
-    "E" = 0.005,
-    "H" = 0.075,
-    "I" = 20,
-    "K" = 5,
-    "M" = 1.25,
-    "N" = 0.3125),
-  Vers3.December2020 = c( # concentrations in amol/uL equals the amol added to each finalVolume
-    "C" = 0.01,
-    "E" = 0.005,
-    "H" = 0.075,
-    "I" = 20,
-    "K" = 5,
-    "M" = 1.25,
-    "N" = 0.3125),
-  Vers3 = c( # concentrations in amol/uL equals the amol added to each finalVolume
+  Yes = c( # concentrations in amol/uL equals the amol added to each finalVolume
     "miND-01" = 20,
     "miND-02" = 5,
     "miND-03" = 1.25,

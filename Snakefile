@@ -51,9 +51,6 @@ else:
 if('Significance level' in xlsConfig and isinstance(xlsConfig['Significance level'], str)): config['alpha'] = xlsConfig['Significance level']
 else: config['alpha'] = "0.05"
 
-if('Spikein lot' in xlsConfig and isinstance(xlsConfig['Spikein lot'], str)): config['spikeInLot'] = xlsConfig['Spikein lot']
-else: config['spikeInLot'] = ""
-
 if(xlsConfig['Spikein analysis'] != "No"):
     config['includeSpikeIns'] = 1
     config['spikeInVersion'] = xlsConfig['Spikein analysis']

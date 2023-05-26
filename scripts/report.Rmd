@@ -35,7 +35,7 @@ if(!exists("snakemake")) {
   mirnaMappingStatsRPMVar <- paste(debugOutputPath, "analysis_sampleMappingStats/all_samples_rpm_miRNA.csv", sep="/")
   deDirVar <- paste(debugOutputPath, "analysis_differentialExpression/", sep="/")
   spikeInAnalysis <- TRUE
-  spikeInVersion <- "Vers3"
+  spikeInVersion <- "Yes"
   spikeInLot <- "undefined"
   alpha <- 0.05
 
@@ -64,8 +64,7 @@ if(!exists("snakemake")) {
       spikeInLot <- snakemake@config['spikeInLot']
     }
   } else {
-    spikeInAnalysis <- FALSE
-    messageSpike <- paste("miND® spike-in not added")
+    spikeInAnalysis <- snakemake@config['spikeInVersion']
   }
   alpha <- as.numeric(snakemake@config['alpha'])
   
