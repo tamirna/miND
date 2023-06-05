@@ -124,7 +124,6 @@ Analysis parameters:
 * Reads quality cutoff: `r if(exists("snakemake")) snakemake@config['qualityCutoff']` (phred quality score)
 * Significance level: `r alpha`
 `r ifelse(spikeInAnalysis, paste0("* miND® spike-in version: ", spikeInVersion, if(exists("spikeInLot")) paste0(" (Lot: ",spikeInLot,") "), if(exists("messageSpike")) messageSpike), paste0("*", messageSpike))`
-
 Tabular data can be filtered or sorted using the fields and options at the top of each table. To export the data for further processing, please select the desired format (Excel or CSV) at the table.
 
 # Data exploration
@@ -512,7 +511,7 @@ amol <- 602214 # number of molecules in 1 amol
 finalVolume <- 9.5 # final volume of sample + spikeInsVolume uL of the spikeins with the below concentrations
 spikeInsVolume <- 1
 
-spikeinConcentrations <- spikeInLots[[spikeInVersion]]
+spikeinConcentrations <- spikeInLots[["Yes"]]
 spikeinConcentrations <- spikeinConcentrations[order(names(spikeinConcentrations))]
 
 spikeinFinalConcentrations <- spikeinConcentrations * spikeInsVolume * amol / finalVolume #  final concentrations of the spikeins in 1uL of the sample (molecules/uL)
@@ -1325,7 +1324,7 @@ for (i in 1:length(contrasts)) {
 
     cat(paste0("  \n\nPrefiltering set cutoff to ", round(prefilteringStats$rpmCutoff, 2), " RPM in at least ", prefilteringStats$minLibs, " samples. There were ", prefilteringStats$removeGenes, " low read count miRNAs removed, accounting\nfor ", round(prefilteringStats$removedRCPerc * 100, 4), "% (", prefilteringStats$removedRC, " reads absolute) of the total reads.\n\n "))
 
-    print(htmltools::tagList(xfun::embed_file(paste0(contrastPath, "/dePrefilteringRemovedGenes.xlsx"), name = "dePrefilteringRemovedMiRNAs.xlsx", text = "Download RPM table of prefiltering removed miRNAs")))
+    print(htmltools::tagList(xfun::embed_file(paste0(contrastPath, "/dePrefilteringRemovedGenes.csv"), text = "Download RPM table of prefiltering removed miRNAs")))
   }
 
   fdrData <- paste0(contrastPath, "/fdrAdjustmentThreshold.dat") %>%
@@ -1644,3 +1643,4 @@ devtools::session_info()
 ## References
 
 The following references are provided for tools used with implications on the scientific and statistical outcome of this analysis. A multitude of other tools helped in preparation of this report of which many are available as open source. Please contact us for a full list of references.
+
