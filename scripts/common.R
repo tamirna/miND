@@ -305,3 +305,14 @@ tsne <- function(mydata, labels=FALSE, perplex=15, printres=FALSE, seed=FALSE, a
 
   return(p)
 }
+
+spikeInLots <- list(
+  Yes = c( # concentrations in amol/uL equals the amol added to each finalVolume
+    "miND-01" = 20,
+    "miND-02" = 5,
+    "miND-03" = 1.25,
+    "miND-04" = 0.3125,
+    "miND-05" = 0.075,
+    "miND-06" = 0.01,
+    "miND-07" = 0.005)
+)

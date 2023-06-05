@@ -51,6 +51,17 @@ else:
 if('Significance level' in xlsConfig and isinstance(xlsConfig['Significance level'], str)): config['alpha'] = xlsConfig['Significance level']
 else: config['alpha'] = "0.05"
 
+if(xlsConfig['Spikein analysis'] != "No"):
+    config['includeSpikeIns'] = 1
+    config['spikeInVersion'] = xlsConfig['Spikein analysis']
+else:
+    config['includeSpikeIns'] = 0
+
+if(xlsConfig['Report spikein sequences'] == "Yes"):
+    config['includeSequence'] = 1
+else:
+    config['includeSequence'] = 0
+
 if(xlsConfig['Adapter'] == "Illumina Universal Adapter"):
     config['adapter'] = "-a IlluminaUniversal=AGATCGGAAGAG"
     config['adapterName'] = xlsConfig['Adapter']
@@ -220,7 +231,8 @@ rule combineSampleMappingStats:
     conda:  "envs/ranalysis.yml"
     threads: 1
     shell:
-        "sleep 3 && Rscript scripts/combineSampleMappingStats.R --outFile='{output}' --includeSpikeIns=0 --input.miRNA='{input.miRNA}' --input.spikeins='{input.spikeins}' 2> {log}"
+        "sleep 3 && Rscript scripts/combineSampleMappingStats.R --outFile='{output}' --includeSpikeIns={config[includeSpikeIns]} --input.miRNA='{input.miRNA}' --input.spikeins='{input.spikeins}' 2> {log}"
+
 
 rule combineAllMappingStats:
     input:  csv = expand("%s/analysis_sampleMappingStats/{filename}.csv" % outPath, filename=IDS),
@@ -233,7 +245,7 @@ rule combineAllMappingStats:
     conda:  "envs/ranalysis.yml"
     threads: 1
     shell:
-        "sleep 3 && Rscript scripts/combineAllMappingStats.R --outFile='{output.csv}' --includeSequence=0  --sampleSheetFile='{input.sampleSheetFile}' {input.csv} 2> {log}"
+        "sleep 3 && Rscript scripts/combineAllMappingStats.R --outFile='{output.csv}' --includeSequence={config[includeSequence]}  --sampleSheetFile='{input.sampleSheetFile}' {input.csv} 2> {log}"
 
 rule sortBowtieMapping:
     input: "%s/{mapping}/{filename}.map" % outPath
@@ -361,7 +373,7 @@ rule mappingBBDukSpikeInsCore:
     conda:
         "envs/bbmap.yml"
     shell:
-        "bbduk.sh threads={threads} -Xmx12g in='{input}' outm=stdout.fq ref='libs/spikeins/spikeins_core.fa' stats='{output.stats}' statscolumns=5 k=13 maskmiddle=f rcomp=f hdist=0 edist=0 rename=t > /dev/null 2> {log}"
+        "bbduk.sh threads={threads} -Xmx1024m in='{input}' outm=stdout.fq ref='libs/spikeins/spikeins_core.fa' stats='{output.stats}' statscolumns=5 k=13 maskmiddle=f rcomp=f hdist=0 edist=0 rename=t > /dev/null 2> {log}"
 
 rule mappingBBDukSpikeIns:
     input:  "%s/fastq_trimmed/{filename}.fastq" % outPath
@@ -372,7 +384,7 @@ rule mappingBBDukSpikeIns:
     conda:
         "envs/bbmap.yml"
     shell:
-        "bbduk.sh threads={threads} -Xmx12g in='{input}' outm=stdout.fq ref='libs/spikeins/spikeins.fa' stats='{output.stats}' statscolumns=5 k=21 maskmiddle=f rcomp=f hdist=0 edist=0 rename=t > /dev/null 2> {log}"
+        "bbduk.sh threads={threads} -Xmx1024m in='{input}' outm=stdout.fq ref='libs/spikeins/spikeins.fa' stats='{output.stats}' statscolumns=5 k=21 maskmiddle=f rcomp=f hdist=0 edist=0 rename=t > /dev/null 2> {log}"
 
 rule filterCollapsedReads:
     input: "%s/fastq_collapsed/{filename}.fastq" % outPath

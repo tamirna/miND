@@ -31,9 +31,11 @@ dependencies:
   - r-statmod=1.4.* # bioconda
   - r-yaml=2.2.*
   - r-pheatmap=1.0.12 # conda-forge
-  - r-xfun=0.22
+  - r-xfun=0.27
   - r-writexls=6.*
   - r-rtsne=0.15
   - r-ggfortify=0.4.*
   - r-foreach=1.5.*
   - r-doparallel=1.0.*
+  - perl-app-cpanminus=1.7046
+  - libnsl=2.*
