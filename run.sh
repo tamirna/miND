@@ -1,7 +1,7 @@
 #!/bin/bash
 source ~/.bashrc
 
-MINDVERSION="1.2 RC1"
+MINDVERSION="1.3"
 # read command line arguments
 
 POSITIONAL=()
