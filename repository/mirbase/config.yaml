@@ -6,7 +6,7 @@ threads:
   high: 6
   medium: 4
   low: 2
-baseUrl: "https://www.mirbase.org/ftp"
+baseUrl: "https://mirbase.org/download_version_files"
 version: '22.1'
 # select the three letter codes of species that you want to include in the analysis. Any species included in miRBase is supported
 species:

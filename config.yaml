@@ -1,4 +1,33 @@
 ---
+# sampleSheet
+
+sampleSheet: data/E-MTAB-6885_SampleContrastSheet.xlsx
+
+
+# add excel metadata
+projectID: E-MTAB-6885
+
+projectComment: "Samples from ENA project PRJEB27261"
+
+speciesName: "Homo sapiens"
+
+deAnalysis: 1
+
+alpha: 0.05
+
+includeSpikeIns: 0
+spikeInVersion: "No"
+
+includeSequence: 0
+
+adapter: "-a IlluminaSmallRNA3p=TGGAATTCTC"
+adapterName: "Illumina Small RNA 3'"
+
+readMinLength: 17
+
+qualityCutoff: 30
+
+
 # define distribution of threads on single rules running in snakemake.
 # e.g. 12, 8, 3 works out well on a 48 core machine.
 # for a 12 core cpu, 6,4,2 could be a good starting point.
