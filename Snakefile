@@ -290,7 +290,7 @@ rule mappingBowtieGenome:
     threads: config['threads']['medium']
     shell:
         """
-            latch cp latch://4034.account/snakemake/mind/{config[repoPath]}/{config[genomeID]}/{config[genomeVersion]} {config[genomeVersion]} &&\
+            latch cp latch://23349.account/snakemake/mind/{config[repoPath]}/{config[genomeID]}/{config[genomeVersion]} {config[genomeVersion]} &&\
             bowtie --threads {threads} -f -k1 -v2 --fullref --un '{output.unmapped}' --al '{output.mapped}' {config[genomeVersion]}/bowtiedb/genome '{input}' > '{output.map}' 2> {log}
             cat '{output.mapped}' | awk '{{if(NR%2==1) {{printf "%s\t",$0}} else {{printf "%i\\n",length($1)}} }}' | cut -d "x" -f2 | awk '{{i[$2]+=$1}} END{{for(x in i){{print i[x]" "x}}}}' | sort -k2 -n > {output.mappedSeqSizeDist} 2> {log}
             cat '{output.unmapped}' | awk '{{if(NR%2==1) {{printf "%s\t",$0}} else {{printf "%i\\n",length($1)}} }}' | cut -d "x" -f2 | awk '{{i[$2]+=$1}} END{{for(x in i){{print i[x]" "x}}}}' | sort -k2 -n > {output.unmappedSeqSizeDist} 2> {log}
@@ -307,7 +307,7 @@ rule mappingBowtieMirna:
         "bowtie1"
     shell:
         """
-        latch cp latch://4034.account/snakemake/mind/repository/data/mirbase mirbase &&\
+        latch cp latch://23349.account/snakemake/mind/repository/data/mirbase mirbase &&\
         bowtie --threads {threads} -f -k1 --fullref --best -v1 --un '{output.unmapped}' mirbase/{config[miRBaseVersion]}/hairpin/bowtiedb/hairpin-{config[speciesCode]} '{input}' > '{output.map}' 2> {log}
         """
 
@@ -322,7 +322,7 @@ rule mappingBowtieRNAcentral:
         "bowtie1"
     shell:
         """
-        latch cp latch://4034.account/snakemake/mind/{config[repoPath]}/rnacentral/{config[rnacentralVersion]}/bowtiedb bowtiedb &&\
+        latch cp latch://23349.account/snakemake/mind/{config[repoPath]}/rnacentral/{config[rnacentralVersion]}/bowtiedb bowtiedb &&\
         bowtie --threads {threads} -f -k1 --fullref --best -v1 --norc --un '{output.unmapped}' bowtiedb/rnacentral_species_specific_ids-{config[speciesTxid]} '{input}' > '{output.map}' 2> {log}
         """
 
@@ -337,7 +337,7 @@ rule mappingBowtieCDNA:
         "bowtie1"
     shell:
         """
-        latch cp latch://4034.account/snakemake/mind/{config[repoPath]}/{config[genomeID]}/{config[genomeVersion]} {config[genomeVersion]} &&\
+        latch cp latch://23349.account/snakemake/mind/{config[repoPath]}/{config[genomeID]}/{config[genomeVersion]} {config[genomeVersion]} &&\
         bowtie --threads {threads} -f -k1 --fullref --best -v1 --norc --un '{output.unmapped}' {config[genomeVersion]}/bowtiedb/cdna '{input}' > '{output.map}' 2> {log}
         """
 
@@ -371,7 +371,7 @@ rule mappingMiRDeep2MiRNA:
         "mirdeep2"
     shell:
         """
-        latch cp latch://4034.account/snakemake/mind/repository/data/mirbase mirbase &&\
+        latch cp latch://23349.account/snakemake/mind/repository/data/mirbase mirbase &&\
         subDirs=$(awk -F"/" '{{print NF-1}}' <<< "{input.collapsedReads}")
         subDirPath=$(seq ${{subDirs}} | awk '{{printf "../"}}')
         mkdir -p '{params.outputDir}'
