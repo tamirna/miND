@@ -3,4 +3,4 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - biopython=1.73
+  - biopython

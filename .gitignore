@@ -16,3 +16,6 @@ scripts/report_files
 .DS_Store
 ._*
 ~$*
+*.ipynb_checkpoints/
+.latch/
+__pycache__/
