@@ -63,7 +63,7 @@ run mamba env create --file /opt/latch/seqtk.yml
 # Copy workflow data (use .dockerignore to skip files)
 copy . .latch/* /root/
 
-run cd /root/envs/latch && pip install -e .
+run pip install latch==2.36.7
 
 # Latch workflow registration metadata
 # DO NOT CHANGE
