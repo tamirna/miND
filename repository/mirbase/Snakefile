@@ -87,26 +87,28 @@ rule convertRNAtoDNA:
         awk 'BEGIN{{RS=">";FS="\\n"}}NR>1{{printf ">%s\\n",$1;for (i=2;i<=NF;i++) {{gsub(/U/,"T",$i); printf "%s\\n",$i}}}}' {input} | seqtk seq -l0 - > {output}
         """
 rule uncompressFiles:
-    input: "%s/{type}/{type}.fa.gz" % (outdir)
+    input: "%s/{type}/{type}.fa" % (outdir)
     output: temp("%s/{type}/uncompressed/{type}.rna.fa" % (outdir))
     conda:
         "../envs/pigz.yml"
     threads: config['threads']['medium']
     shell: '''
-	pigz -p{threads} -dc {input} > {output}
+	# pigz -p{threads} -dc {input} > {output}
+    mv {input} {output}
     '''
 
 rule moveFiles:
-    input: "%s/{file}.fa.gz" % (outdir)
-    output: temp("%s/{file}/{file}.fa.gz" % (outdir))
+    input: "%s/{file}.fa" % (outdir)
+    output: temp("%s/{file}/{file}.fa" % (outdir))
     threads: 1
     shell: "mv {input} {output}"
 
-remoteFiles = expand("%s/{type}.fa.gz" % (outdir), type=config["types"])
+remoteFiles = expand("%s/{type}.fa" % (outdir), type=config["types"])
 rule downloadRemoteFiles:
     output: temp(remoteFiles)
     threads: 1
     run:
+        print("remote files", remoteFiles)
         for i in range(len(remoteFiles)):
             fileNamePath = os.path.split(str(remoteFiles[i]))
             filePath = fileNamePath[0]

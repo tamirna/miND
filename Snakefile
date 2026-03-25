@@ -81,19 +81,29 @@ else: config['readMinLength'] = "17"
 if('Reads quality cutoff' in xlsConfig and isinstance(xlsConfig['Reads quality cutoff'], str)): config['qualityCutoff'] = xlsConfig['Reads quality cutoff']
 else: config['qualityCutoff'] = "30"
 
-# read samples from XLS sheet
-xlsSamples = []
-xls = pd.read_excel(sampleSheet, index_col = 0, sheet_name = 'Sample Group Matrix', converters={0:str,1:str,2:str}, usecols = "A:G")
-for index, row in xls.iterrows():
-    filename = row["Filename"]
-    if isinstance(filename, str):
-        # remove file extensions should there be any
-        filename = filename.rstrip(".fastq.gz")
-        filename = filename.rstrip(".fq.gz")
-        filename = filename.rstrip(".fastq")
-        filename = filename.rstrip(".fq")
-        filename = filename.rstrip(".bam")
-        xlsSamples.append(filename)
+#read samples from XLS sheet
+
+def get_ids(sampleSheet):
+    xlsSamples = []
+    xls = pd.read_excel(sampleSheet, index_col = 0, sheet_name = 'Sample Group Matrix', converters={0:str,1:str,2:str}, usecols = "A:G")
+    for index, row in xls.iterrows():
+        filename = row["Filename"]
+        if isinstance(filename, str):
+            # remove file extensions should there be any
+            filename = filename.rstrip(".fastq.gz")
+            filename = filename.rstrip(".fq.gz")
+            filename = filename.rstrip(".fastq")
+            filename = filename.rstrip(".fq")
+            filename = filename.rstrip(".bam")
+            xlsSamples.append(filename)
+
+    if(len(xlsSamples) > 0):
+        IDS = xlsSamples
+    else:
+        print("No input files found!")
+        sys.exit()
+
+    return IDS
 
 if 'outputSubfolder' in config and config['outputSubfolder'] == 'date':
     from datetime import datetime
@@ -107,12 +117,6 @@ else:
         outputSubfolder = sampleSheetStem.replace("-SampleContrastSheet", "").replace("_SampleContrastSheet", "")
 
 outPath = "output/" + outputSubfolder
-
-if(len(xlsSamples) > 0):
-    IDS = xlsSamples
-else:
-    print("No input files found!")
-    sys.exit()
 
 def getInput_all(wildcards):
     inputList = []
@@ -160,8 +164,14 @@ def getInput_makeHTMLReport(wildcards):
     inputList['mirnaMappingStats'] = "%s/analysis_sampleMappingStats/all_samples.csv" % outPath
     inputList['mirnaMappingStatsRPM'] = "%s/analysis_sampleMappingStats/all_samples_rpm_miRNA.csv" % outPath
     inputList['sampleMappingQuantifications'] = "%s/analysis_quantifySampleMappings/all_samples.csv" % outPath
+    inputList['mirnaMappingStatsRPMLib'] = "%s/analysis_sampleMappingStats/all_samples_rpm_lib.csv" % outPath
+    inputList['mirnaMappingStatsRPMDistDat'] = "%s/analysis_sampleMappingStats/all_samples_rpm_dist.dat" % outPath
+    inputList['sampleMappingQuantificationsDat'] = "%s/analysis_quantifySampleMappings/all_samples.dat" % outPath
+    inputList['sampleMappingQuantificationsDatPerc'] = "%s/analysis_quantifySampleMappings/all_samples_perc.dat" % outPath
+    inputList['sampleMappingQuantificationsCsvPerc'] = "%s/analysis_quantifySampleMappings/all_samples_perc.csv" % outPath
     inputList['csvGenomeMapping'] = "%s/analysis_quantifySampleMappings/all_samples_genome_mapping.csv" % outPath
     inputList['multiQC'] = "%s/multiqc/multiqc_report.html" % outPath
+
     if config["deAnalysis"]:
         inputList['deDir'] = "%s/analysis_differentialExpression/" % outPath
     return inputList
@@ -172,7 +182,7 @@ rule makeHTMLReport:
     output:
         "%s/analysis/report.html" % outPath
     log:    "%s/logs/analysis/report.log" % outPath
-    conda:  "envs/ranalysis.yml"
+    conda:  "ranalysis"
     threads: 1
     script:
         "scripts/report.Rmd"
@@ -186,7 +196,7 @@ rule runDEAnalysis:
     params:
         alpha=config["alpha"]
     log:    "%s/logs/analysis/differentialExpression.log" % outPath
-    conda:  "envs/ranalysis.yml"
+    conda:  "ranalysis"
     threads: 1
     shell:
         "sleep 3 && Rscript scripts/differentialExpression.R --outDir='{output}' --readsFile='{input.readsFile}' --sampleSheetFile='{input.sampleSheetFile}' --alpha='{params.alpha}' > {log} 2>&1"
@@ -195,21 +205,21 @@ rule runDEAnalysis:
 rule quantifySampleMappings:
     input:
         sampleSheetFile = sampleSheet,
-        fastqLibSize = expand("%s/fastq_trimmed/{filename}.fastq.libsize" % outPath, filename=IDS),
-        spikeins = expand("%s/mapping_bowtie_spikeins/{filename}.map" % outPath, filename=IDS),
-        genome = expand("%s/mapping_bowtie_genome/{filename}.map" % outPath, filename=IDS),
-        mirna = expand("%s/mapping_bowtie_mirna/{filename}.map" % outPath, filename=IDS),
-        rnacentral = expand("%s/mapping_bowtie_rnacentral/{filename}.map" % outPath, filename=IDS),
-        cdna = expand("%s/mapping_bowtie_cdna/{filename}.map" % outPath, filename=IDS),
-        mappedSeqSizeDist = expand("%s/mapping_bowtie_genome/{filename}.mapped.ssd" % outPath, filename=IDS),
-        unmappedSeqSizeDist = expand("%s/mapping_bowtie_genome/{filename}.unmapped.ssd" % outPath, filename=IDS)
+        fastqLibSize = expand("%s/fastq_trimmed/{filename}.fastq.libsize" % outPath, filename=get_ids(sampleSheet)),
+        spikeins = expand("%s/mapping_bowtie_spikeins/{filename}.map" % outPath, filename=get_ids(sampleSheet)),
+        genome = expand("%s/mapping_bowtie_genome/{filename}.map" % outPath, filename=get_ids(sampleSheet)),
+        mirna = expand("%s/mapping_bowtie_mirna/{filename}.map" % outPath, filename=get_ids(sampleSheet)),
+        rnacentral = expand("%s/mapping_bowtie_rnacentral/{filename}.map" % outPath, filename=get_ids(sampleSheet)),
+        cdna = expand("%s/mapping_bowtie_cdna/{filename}.map" % outPath, filename=get_ids(sampleSheet)),
+        mappedSeqSizeDist = expand("%s/mapping_bowtie_genome/{filename}.mapped.ssd" % outPath, filename=get_ids(sampleSheet)),
+        unmappedSeqSizeDist = expand("%s/mapping_bowtie_genome/{filename}.unmapped.ssd" % outPath, filename=get_ids(sampleSheet))
     output: csv = "%s/analysis_quantifySampleMappings/all_samples.csv" % outPath,
             dat = "%s/analysis_quantifySampleMappings/all_samples.dat" % outPath,
             csvPerc = "%s/analysis_quantifySampleMappings/all_samples_perc.csv" % outPath,
             datPerc = "%s/analysis_quantifySampleMappings/all_samples_perc.dat" % outPath,
             csvGenomeMapping = "%s/analysis_quantifySampleMappings/all_samples_genome_mapping.csv" % outPath
     log:    "%s/logs/analysis/quantifySampleMappings.log" % outPath
-    conda:  "envs/ranalysis.yml"
+    conda:  "ranalysis"
     threads: config['threads']['high']
     shell:
         "sleep 3 && Rscript scripts/quantifySampleMappings.R --outFile='{output.csv}' --outFileGenomeMapping='{output.csvGenomeMapping}' --sampleSheetFile='{input.sampleSheetFile}' --cores={threads} {input.genome} 2> {log}"
@@ -228,21 +238,21 @@ rule combineSampleMappingStats:
         spikeins = "%s/mapping_bbduk_spikeins_core/{filename}.txt" % outPath
     output: "%s/analysis_sampleMappingStats/{filename}.csv" % outPath
     log:    "%s/logs/analysis/sampleMappingStats/{filename}.log" % outPath
-    conda:  "envs/ranalysis.yml"
+    conda:  "ranalysis"
     threads: 1
     shell:
         "sleep 3 && Rscript scripts/combineSampleMappingStats.R --outFile='{output}' --includeSpikeIns={config[includeSpikeIns]} --input.miRNA='{input.miRNA}' --input.spikeins='{input.spikeins}' 2> {log}"
 
 
 rule combineAllMappingStats:
-    input:  csv = expand("%s/analysis_sampleMappingStats/{filename}.csv" % outPath, filename=IDS),
+    input:  csv = expand("%s/analysis_sampleMappingStats/{filename}.csv" % outPath, filename=get_ids(sampleSheet)),
             sampleSheetFile = sampleSheet
     output: csv = "%s/analysis_sampleMappingStats/all_samples.csv" % outPath,
             csvRPMmiRNA = "%s/analysis_sampleMappingStats/all_samples_rpm_miRNA.csv" % outPath,
             csvRPMLib = "%s/analysis_sampleMappingStats/all_samples_rpm_lib.csv" % outPath,
             plot = "%s/analysis_sampleMappingStats/all_samples_rpm_dist.dat" % outPath
     log:    "%s/logs/analysis/combineAllMappingStats.log" % outPath
-    conda:  "envs/ranalysis.yml"
+    conda:  "ranalysis"
     threads: 1
     shell:
         "sleep 3 && Rscript scripts/combineAllMappingStats.R --outFile='{output.csv}' --includeSequence={config[includeSequence]}  --sampleSheetFile='{input.sampleSheetFile}' {input.csv} 2> {log}"
@@ -263,7 +273,7 @@ rule mappingBowtieSpikeIns:
     threads: config['threads']['medium']
     log:    "%s/logs/mapping_bowtie_spikeins/{filename}.log" % outPath
     conda:
-        "envs/bowtie1.yml"
+        "bowtie1"
     shell:
         "bowtie --threads {threads} -f -k1 --fullref --best -v0 --norc --un '{output.unmapped}' libs/spikeins/spikeins_full '{input}' > '{output.map}' 2> {log}"
 
@@ -276,11 +286,12 @@ rule mappingBowtieGenome:
             mappedSeqSizeDist = "%s/mapping_bowtie_genome/{filename}.mapped.ssd" % outPath,
             unmappedSeqSizeDist = "%s/mapping_bowtie_genome/{filename}.unmapped.ssd" % outPath
     log:    "%s/logs/mapping_bowtie_genome/{filename}.log" % outPath
-    conda:  "envs/bowtie1.yml"
+    conda:  "bowtie1"
     threads: config['threads']['medium']
     shell:
         """
-            bowtie --threads {threads} -f -k1 -v2 --fullref --un '{output.unmapped}' --al '{output.mapped}' {config[repoPath]}/{config[genomeID]}/{config[genomeVersion]}/bowtiedb/genome '{input}' > '{output.map}' 2> {log}
+            latch cp latch://23349.account/snakemake/mind/{config[repoPath]}/{config[genomeID]}/{config[genomeVersion]} {config[genomeVersion]} &&\
+            bowtie --threads {threads} -f -k1 -v2 --fullref --un '{output.unmapped}' --al '{output.mapped}' {config[genomeVersion]}/bowtiedb/genome '{input}' > '{output.map}' 2> {log}
             cat '{output.mapped}' | awk '{{if(NR%2==1) {{printf "%s\t",$0}} else {{printf "%i\\n",length($1)}} }}' | cut -d "x" -f2 | awk '{{i[$2]+=$1}} END{{for(x in i){{print i[x]" "x}}}}' | sort -k2 -n > {output.mappedSeqSizeDist} 2> {log}
             cat '{output.unmapped}' | awk '{{if(NR%2==1) {{printf "%s\t",$0}} else {{printf "%i\\n",length($1)}} }}' | cut -d "x" -f2 | awk '{{i[$2]+=$1}} END{{for(x in i){{print i[x]" "x}}}}' | sort -k2 -n > {output.unmappedSeqSizeDist} 2> {log}
         """
@@ -293,9 +304,12 @@ rule mappingBowtieMirna:
     threads: config['threads']['medium']
     log:    "%s/logs/mapping_bowtie_mirna/{filename}.log" % outPath
     conda:
-        "envs/bowtie1.yml"
+        "bowtie1"
     shell:
-        "bowtie --threads {threads} -f -k1 --fullref --best -v1 --un '{output.unmapped}' {config[repoPath]}/mirbase/{config[miRBaseVersion]}/hairpin/bowtiedb/hairpin-{config[speciesCode]} '{input}' > '{output.map}' 2> {log}"
+        """
+        latch cp latch://23349.account/snakemake/mind/repository/data/mirbase mirbase &&\
+        bowtie --threads {threads} -f -k1 --fullref --best -v1 --un '{output.unmapped}' mirbase/{config[miRBaseVersion]}/hairpin/bowtiedb/hairpin-{config[speciesCode]} '{input}' > '{output.map}' 2> {log}
+        """
 
 rule mappingBowtieRNAcentral:
     input:  "%s/mapping_bowtie_mirna/{filename}.unmapped.fasta" % outPath
@@ -305,9 +319,12 @@ rule mappingBowtieRNAcentral:
     threads: config['threads']['medium']
     log:    "%s/logs/mapping_bowtie_rnacentral/{filename}.log" % outPath
     conda:
-        "envs/bowtie1.yml"
+        "bowtie1"
     shell:
-        "bowtie --threads {threads} -f -k1 --fullref --best -v1 --norc --un '{output.unmapped}' {config[repoPath]}/rnacentral/{config[rnacentralVersion]}/bowtiedb/rnacentral_species_specific_ids-{config[speciesTxid]} '{input}' > '{output.map}' 2> {log}"
+        """
+        latch cp latch://23349.account/snakemake/mind/{config[repoPath]}/rnacentral/{config[rnacentralVersion]}/bowtiedb bowtiedb &&\
+        bowtie --threads {threads} -f -k1 --fullref --best -v1 --norc --un '{output.unmapped}' bowtiedb/rnacentral_species_specific_ids-{config[speciesTxid]} '{input}' > '{output.map}' 2> {log}
+        """
 
 rule mappingBowtieCDNA:
     input:  "%s/mapping_bowtie_rnacentral/{filename}.unmapped.fasta" % outPath
@@ -317,9 +334,12 @@ rule mappingBowtieCDNA:
     threads: config['threads']['medium']
     log:    "%s/logs/mapping_bowtie_cdna/{filename}.log" % outPath
     conda:
-        "envs/bowtie1.yml"
+        "bowtie1"
     shell:
-        "bowtie --threads {threads} -f -k1 --fullref --best -v1 --norc --un '{output.unmapped}' {config[repoPath]}/{config[genomeID]}/{config[genomeVersion]}/bowtiedb/cdna '{input}' > '{output.map}' 2> {log}"
+        """
+        latch cp latch://23349.account/snakemake/mind/{config[repoPath]}/{config[genomeID]}/{config[genomeVersion]} {config[genomeVersion]} &&\
+        bowtie --threads {threads} -f -k1 --fullref --best -v1 --norc --un '{output.unmapped}' {config[genomeVersion]}/bowtiedb/cdna '{input}' > '{output.map}' 2> {log}
+        """
 
 rule miRDeepPrep:
     input: "%s/fastq_trimmed/{filename}.fastq" % outPath
@@ -329,7 +349,7 @@ rule miRDeepPrep:
     threads: config['threads']['medium']
     log:    "%s/logs/mapping_mirdeep2_miRNA/{filename}.log" % outPath
     conda:
-        "envs/mirdeep2.yml"
+        "mirdeep2"
     shell:
         """
             mapper.pl '{input}' -e -h -j -l %s -o {threads} -m -s '{output.collapsedReads}' > '{log}' 2>&1
@@ -348,18 +368,19 @@ rule mappingMiRDeep2MiRNA:
     threads: config['threads']['medium']
     log:    "%s/logs/mapping_mirdeep2_miRNA/{filename}.log" % outPath
     conda:
-        "envs/mirdeep2.yml"
+        "mirdeep2"
     shell:
         """
+        latch cp latch://23349.account/snakemake/mind/repository/data/mirbase mirbase &&\
         subDirs=$(awk -F"/" '{{print NF-1}}' <<< "{input.collapsedReads}")
         subDirPath=$(seq ${{subDirs}} | awk '{{printf "../"}}')
         mkdir -p '{params.outputDir}'
         cd '{params.outputDir}'
-        quantifier.pl -p '{workflow.basedir}/{config[repoPath]}/mirbase/{config[miRBaseVersion]}/hairpin/uncompressed/hairpin-{config[speciesCode]}.dna.fa' \
+        quantifier.pl -p '{workflow.basedir}/mirbase/{config[miRBaseVersion]}/hairpin/uncompressed/hairpin-{config[speciesCode]}.dna.fa' \
             -y 'default' \
             -T {threads} \
             -d \
-            -m '{workflow.basedir}/{config[repoPath]}/mirbase/{config[miRBaseVersion]}/mature/uncompressed/mature-{config[speciesCode]}.dna.fa' \
+            -m '{workflow.basedir}/mirbase/{config[miRBaseVersion]}/mature/uncompressed/mature-{config[speciesCode]}.dna.fa' \
             -r "../${{subDirPath}}{input.collapsedReads}" > "../${{subDirPath}}{log}" 2>&1
         rm -fr expression_analyses/expression_analyses_default/*.ebwt
         """
@@ -371,7 +392,7 @@ rule mappingBBDukSpikeInsCore:
     threads: config['threads']['high']
     log:    "%s/logs/mapping_bbduk_spikeins_core/{filename}.log" % outPath
     conda:
-        "envs/bbmap.yml"
+        "bbmap"
     shell:
         "bbduk.sh threads={threads} -Xmx1024m in='{input}' outm=stdout.fq ref='libs/spikeins/spikeins_core.fa' stats='{output.stats}' statscolumns=5 k=13 maskmiddle=f rcomp=f hdist=0 edist=0 rename=t > /dev/null 2> {log}"
 
@@ -382,7 +403,7 @@ rule mappingBBDukSpikeIns:
     threads: config['threads']['high']
     log:    "%s/logs/mapping_bbduk_spikeins/{filename}.log" % outPath
     conda:
-        "envs/bbmap.yml"
+        "bbmap"
     shell:
         "bbduk.sh threads={threads} -Xmx1024m in='{input}' outm=stdout.fq ref='libs/spikeins/spikeins.fa' stats='{output.stats}' statscolumns=5 k=21 maskmiddle=f rcomp=f hdist=0 edist=0 rename=t > /dev/null 2> {log}"
 
@@ -399,7 +420,7 @@ rule collapseReadsFastq:
     log:    "%s/logs/fastq_collapsed/{filename}.log" % outPath
     params:
         outPath = outPath
-    conda:  "envs/seqcluster.yml"
+    conda:  "seqcluster"
     threads: 1
     shell: """
         seqcluster collapse -f '{input}' -o {params.outPath}/fastq_collapsed/{wildcards.filename}/ > {log} 2>&1
@@ -445,19 +466,19 @@ rule bam2fastq:
     output: temp("%s/fastq_raw/{filename}.fastq" % outPath)
     threads: config['threads']['low']
     log: "%s/logs/fastq_raw/{filename}.log" % outPath
-    conda:  "envs/samtools.yml"
+    conda:  "samtools"
     shell:
         "samtools bam2fq {input} > {output} 2> {log}"
 
 rule multiQC:
     input:
-        fastqc = expand("%s/{type}/{filename}_fastqc.zip" % outPath, type={'fastqc_raw', 'fastqc_trimmed'}, filename=IDS),
-        cutadapt = expand("%s/logs/fastq_trimmed/{filename}.log" % outPath, filename=IDS)
+        fastqc = expand("%s/{type}/{filename}_fastqc.zip" % outPath, type={'fastqc_raw', 'fastqc_trimmed'}, filename=get_ids(sampleSheet)),
+        cutadapt = expand("%s/logs/fastq_trimmed/{filename}.log" % outPath, filename=get_ids(sampleSheet))
     output: "%s/multiqc/multiqc_report.html" % outPath
     log:    "%s/multiqc/multiqc.log" % outPath
     params:
         outPath = outPath
-    conda:  "envs/multiqc.yml"
+    conda:  "multiqc"
     threads: 1
     shell:
         """
@@ -473,7 +494,7 @@ rule fastQC:
     log:    "%s/logs/fastqc_{mod}/{filename}.log" % outPath
     params:
         outPath = outPath
-    conda:  "envs/fastqc.yml"
+    conda:  "fastqc"
     threads: config['threads']['low']
     shell:
         """
@@ -484,7 +505,7 @@ rule adapterTrimming:
     input:  "%s/fastq_raw/{filename}.fastq" % outPath
     output: temp("%s/fastq_trimmed/{filename}.fastq" % outPath)
     log:    "%s/logs/fastq_trimmed/{filename}.log" % outPath
-    conda:  "envs/cutadapt.yml"
+    conda:  "cutadapt"
     threads: config['threads']['high']
     shell:
         "cutadapt {config[adapter]} --minimum-length {config[readMinLength]} --quality-cutoff {config[qualityCutoff]} --discard-untrimmed --cores={threads} -o '{output}' '{input}' > {log} 2>&1"

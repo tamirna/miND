@@ -176,9 +176,9 @@ if [[ "${KEEPTMP}" == "YES" ]]; then
  cmdlineargs="${cmdlineargs} --notemp"
 fi
 
-echo "Unlocking snakemake"
-snakemake --unlock $cmdlineargs
-echo "Running pipeline"
-snakemake --use-conda --conda-prefix=$CONDA_PREFIX --conda-frontend=mamba --restart-times=1 --cores $cmdlineargs
+# echo "Unlocking snakemake"
+# snakemake --unlock $cmdlineargs
+# echo "Running pipeline"
+# snakemake --use-conda --conda-prefix=$CONDA_PREFIX --conda-frontend=mamba --restart-times=1 --cores $cmdlineargs
 
 exit 0
